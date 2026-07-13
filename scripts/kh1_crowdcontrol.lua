@@ -21,6 +21,13 @@
     -- a require()'d native module doesn't need to be a top-level script).
 ]]
 
+-- kh1_lua_library's functions (soraHP, zantHack, fnc_play_se2, etc.) read
+-- version-specific globals that only exist after VersionCheck has required
+-- the matching SteamGlobal_*/EGSGlobal_* file -- same require ORDER
+-- KH1-RANDOMIZER's own entry script uses. Skipping this would leave every
+-- kh1_lua_library call below silently operating on nil addresses.
+require("VersionCheck")
+
 local kh1 = require("kh1_lua_library")
 local json = require("json")
 local ccnet = require("kh1_crowdcontrol_native")
@@ -34,39 +41,315 @@ local recv_buffer = ""
 local next_reconnect_attempt = 0
 
 -- ####################### --
+-- # Timed-effect tracking # --
+-- ####################### --
+
+-- Effects that return a `revert` function from `apply` get auto-reverted
+-- this many seconds later (Crowd Control sends `duration` in milliseconds on
+-- the request when the pack marks an effect as timed; this is the fallback
+-- for untimed/test triggers). Keyed by effect CODE, not request id: a second
+-- redemption of the same still-active effect just extends the deadline
+-- rather than re-applying (re-applying would re-capture "current" state as
+-- the new baseline mid-effect and revert to the wrong value, or race a
+-- second revert against the first). This does NOT protect against two
+-- DIFFERENT effect codes touching the same underlying value (e.g. mega_combos
+-- and no_combos both writing the combo limit) -- whichever reverts last wins.
+-- Acceptable jank for a chaos-mod feature; not worth a full resource-lock
+-- system here.
+local DEFAULT_DURATION_SECONDS = 30
+local active_timed_effects = {} -- code -> { revert = fn, deadline = number }
+
+local function effect_duration_seconds(request)
+    if request.duration and request.duration > 0 then
+        return request.duration / 1000 -- Crowd Control sends duration in milliseconds
+    end
+    return DEFAULT_DURATION_SECONDS
+end
+
+local function update_timed_effects()
+    local now = os.clock()
+    for code, effect in pairs(active_timed_effects) do
+        if now >= effect.deadline then
+            pcall(effect.revert)
+            active_timed_effects[code] = nil
+        end
+    end
+end
+
+-- ####################### --
+-- # Effect helper factories # --
+-- ####################### --
+
+-- A well-defined on/off pair (force_scan, allow_air_items, etc. all already
+-- define both directions themselves in kh1_lua_library) -- no state capture
+-- needed, `off` IS the vanilla state.
+local function toggle_effect(on_fn, off_fn)
+    return function(request)
+        on_fn()
+        return true, off_fn
+    end
+end
+
+-- ####################### --
 -- # Effect dispatch table # --
 -- ####################### --
 
 -- Keyed by the effect "code" Crowd Control sends in each request -- these
 -- must match the effect ids declared in the game pack (see
--- pack/kh1-crowdcontrol-pack.json). Each handler receives the decoded
--- request table and returns true/false for whether the effect applied.
+-- pack/kh1-crowdcontrol-pack.json). Each handler is `{ apply = function(request)
+-- -> ok, revert_fn end }`; `revert_fn` is omitted for instant, one-shot
+-- effects and required for anything that should auto-expire.
 local effect_handlers = {
     -- The only play_se2 id confirmed live/audible so far (see
     -- kh1_lua_library.lua's play_se2 comment) -- expand this list only with
     -- ids you've verified live, per that function's crash-risk warning.
-    sound_31 = function(request)
-        return kh1.play_se2(31, 0)
-    end,
+    sound_31 = {
+        apply = function(request)
+            return kh1.play_se2(31, 0)
+        end,
+    },
 
     -- TODO: PLACEHOLDER item_id, not verified safe. spawn_prize's own
     -- warning in kh1_lua_library.lua notes an unverified id can corrupt the
     -- pickup icon's animation -- confirm a real, tested item_id before
     -- enabling this effect for real redemptions.
-    item_placeholder = function(request)
-        return kh1.spawn_prize(1)
-    end,
+    item_placeholder = {
+        apply = function(request)
+            return kh1.spawn_prize(1)
+        end,
+    },
 
     -- Free-text effect: the redeemer's typed text (Crowd Control text
     -- parameter, see pack/kh1-crowdcontrol-pack.json) is shown as-is.
-    message = function(request)
-        local text = request.parameters and request.parameters.text
-        if not text or text == "" then
-            return false
-        end
-        return kh1.open_text_box(text, 1, 8)
-    end,
+    message = {
+        apply = function(request)
+            local text = request.parameters and request.parameters.text
+            if not text or text == "" then
+                return false
+            end
+            return kh1.open_text_box(text, 1, 8)
+        end,
+    },
+
+    -- ############### --
+    -- # Toggles      # --
+    -- ############### --
+    -- Each of these already has a real, library-defined "off" state, so
+    -- reverting is exact -- no guessed baseline involved.
+
+    force_scan = {
+        apply = toggle_effect(
+            function() kh1.force_scan(true) end,
+            function() kh1.force_scan(false) end
+        ),
+    },
+    force_combo_master = {
+        apply = toggle_effect(
+            function() kh1.force_combo_master(true) end,
+            function() kh1.force_combo_master(false) end
+        ),
+    },
+    summon_anywhere = {
+        apply = toggle_effect(
+            function() kh1.allow_summon_anywhere(true) end,
+            function() kh1.allow_summon_anywhere(false) end
+        ),
+    },
+    midair_dodge_guard = {
+        apply = toggle_effect(
+            function() kh1.allow_midair_dodge_roll_guard(true) end,
+            function() kh1.allow_midair_dodge_roll_guard(false) end
+        ),
+    },
+    air_items = {
+        apply = toggle_effect(
+            function() kh1.allow_air_items(true) end,
+            function() kh1.allow_air_items(false) end
+        ),
+    },
+
+    -- ####################### --
+    -- # Combo limit           # --
+    -- ####################### --
+    -- Captures the real current limits via the library's own getters and
+    -- restores exactly those, rather than assuming a hardcoded vanilla value
+    -- (vanilla itself varies with equipped abilities -- see
+    -- calculate_ground_combo_limit/calculate_air_combo_limit).
+
+    mega_combos = {
+        apply = function(request)
+            local original_ground = kh1.get_ground_combo_length_limit()
+            local original_air = kh1.get_air_combo_length_limit()
+            kh1.set_ground_combo_length_limit(10)
+            kh1.set_air_combo_length_limit(10)
+            return true, function()
+                kh1.set_ground_combo_length_limit(original_ground)
+                kh1.set_air_combo_length_limit(original_air)
+            end
+        end,
+    },
+    no_combos = {
+        apply = function(request)
+            local original_ground = kh1.get_ground_combo_length_limit()
+            local original_air = kh1.get_air_combo_length_limit()
+            kh1.set_ground_combo_length_limit(1)
+            kh1.set_air_combo_length_limit(1)
+            return true, function()
+                kh1.set_ground_combo_length_limit(original_ground)
+                kh1.set_air_combo_length_limit(original_air)
+            end
+        end,
+    },
+
+    -- ####################### --
+    -- # Animation speed       # --
+    -- ####################### --
+    -- Multiplies whatever the CURRENT speed reads as (rather than writing an
+    -- absolute constant), so revert is always exact and this composes
+    -- correctly even if something else already changed animation speed.
+
+    slow_motion = {
+        apply = function(request)
+            local original = kh1.get_animation_speed()
+            kh1.set_animation_speed(original * 0.5)
+            return true, function() kh1.set_animation_speed(original) end
+        end,
+    },
+    hyper_speed = {
+        apply = function(request)
+            local original = kh1.get_animation_speed()
+            kh1.set_animation_speed(original * 2.0)
+            return true, function() kh1.set_animation_speed(original) end
+        end,
+    },
+
+    -- ####################### --
+    -- # Summon time           # --
+    -- ####################### --
+    -- multiply_summon_time always computes from its own baked-in vanilla
+    -- constant (3000), so reverting to multiplier 1.0 is always exact
+    -- regardless of what the current value is.
+
+    summon_time_half = {
+        apply = function(request)
+            kh1.multiply_summon_time(0.5)
+            return true, function() kh1.multiply_summon_time(1.0) end
+        end,
+    },
+    summon_time_double = {
+        apply = function(request)
+            kh1.multiply_summon_time(2.0)
+            return true, function() kh1.multiply_summon_time(1.0) end
+        end,
+    },
 }
+
+-- ####################### --
+-- # Ability grants        # --
+-- ####################### --
+-- One-shot, permanent (kh1_lua_library only exposes enable_ability, not a
+-- matching disable -- there is nothing to revert to). Uses enable_ability's
+-- own curated name->bit table rather than grant_sora_ability/
+-- grant_shared_ability, which take raw numeric ability ids this repo has no
+-- verified id table for -- same guessed-id risk already flagged for
+-- spawn_prize's item_id.
+local ABILITY_EFFECTS = {
+    ability_vortex = "Vortex",
+    ability_aerial_sweep = "Aerial Sweep",
+    ability_counterattack = "Counterattack",
+    ability_blitz = "Blitz",
+    ability_guard = "Guard",
+    ability_dodge_roll = "Dodge Roll",
+    ability_cheer = "Cheer",
+    ability_slapshot = "Slapshot",
+    ability_sliding_dash = "Sliding Dash",
+    ability_hurricane_blast = "Hurricane Blast",
+    ability_ripple_drive = "Ripple Drive",
+    ability_stun_impact = "Stun Impact",
+    ability_gravity_break = "Gravity Break",
+    ability_zantetsuken = "Zantetsuken",
+    ability_sonic_blade = "Sonic Blade",
+    ability_ars_arcanum = "Ars Arcanum",
+    ability_strike_raid = "Strike Raid",
+    ability_ragnarok = "Ragnarok",
+    ability_trinity_limit = "Trinity Limit",
+    ability_mp_haste = "MP Haste",
+    ability_mp_rage = "MP Rage",
+    ability_second_chance = "Second Chance",
+    ability_berserk = "Berserk",
+    ability_leaf_bracer = "Leaf Bracer",
+}
+for code, ability_name in pairs(ABILITY_EFFECTS) do
+    effect_handlers[code] = {
+        apply = function(request)
+            kh1.enable_ability(ability_name)
+            return true
+        end,
+    }
+end
+
+-- ####################### --
+-- # Magic effectiveness   # --
+-- ####################### --
+-- EXPERIMENTAL / not live-verified: set_spell_effectiveness has no
+-- documented safe value range anywhere in kh1_lua_library (unlike play_se2,
+-- which does document a crash from a bad id). Scaling whatever the CURRENT
+-- byte value already is (rather than writing a guessed absolute constant)
+-- keeps the write inside the same valid byte range the game itself is
+-- already using, which is a plain data multiplier (not an id/index lookup
+-- like play_se2's se_id), so the crash risk profile should be much lower --
+-- but this has not been confirmed live. Test before relying on it.
+local SPELL_NAMES = {
+    "Fire", "Fira", "Firaga", "Blizzard", "Blizzara", "Blizzaga",
+    "Thunder", "Thundara", "Thundaga", "Cure", "Cura", "Curaga",
+    "Gravity", "Gravira", "Graviga", "Stop", "Stopra", "Stopga",
+    "Aero", "Aerora", "Aeroga",
+}
+
+local function spell_effectiveness_effect(multiplier)
+    return function(request)
+        local originals = {}
+        for _, spell in ipairs(SPELL_NAMES) do
+            originals[spell] = kh1.get_spell_effectiveness(spell)
+        end
+        for _, spell in ipairs(SPELL_NAMES) do
+            local new_value = math.floor(originals[spell] * multiplier)
+            if new_value > 255 then new_value = 255 end
+            if new_value < 0 then new_value = 0 end
+            kh1.set_spell_effectiveness(spell, new_value)
+        end
+        return true, function()
+            for _, spell in ipairs(SPELL_NAMES) do
+                kh1.set_spell_effectiveness(spell, originals[spell])
+            end
+        end
+    end
+end
+
+effect_handlers.magic_boost = { apply = spell_effectiveness_effect(1.5) }
+effect_handlers.magic_nerf = { apply = spell_effectiveness_effect(0.5) }
+
+-- ####################### --
+-- # Deliberately NOT wired # --
+-- ####################### --
+-- grant_sora_ability / grant_shared_ability: take raw numeric ability ids;
+--   no verified id table exists in this repo (see ABILITY_EFFECTS above for
+--   the name-based alternative that IS wired).
+-- set_stock_at_index / set_gummi_qty_at_index: index-based with no known
+--   index->item mapping (same guessed-id risk as spawn_prize's item_id).
+-- set_sora_walk_speed / set_sora_run_speed: no getter exists, so there's no
+--   way to capture-and-restore the real original -- and no documented
+--   vanilla baseline anywhere in this codebase to revert to instead.
+-- set_spell_cost: no getter exists (unlike effectiveness), so cost changes
+--   can't be safely reverted either.
+-- set_attack_animation_data / set_command_data: raw array writes into
+--   engine tables with no documented safe shape/range -- highest guessed-risk
+--   functions in the library.
+-- show_prompt: the `message` effect above already covers "show custom text"
+--   more simply; show_prompt's multi-box/color parameter shape isn't worth
+--   the extra complexity for the same end result.
+-- make_sora_actionable: an unstick/debug utility, not really a chaos effect
+--   (no inverse action, nothing meaningful to revert).
 
 -- ############### --
 -- # Connection    # --
@@ -107,10 +390,27 @@ end
 local function handle_request(request)
     local handler = effect_handlers[request.code]
     local ok = false
-    if handler then
-        local call_ok, result = pcall(handler, request)
-        ok = call_ok and result and true or false
+
+    if handler and handler.apply then
+        local existing = active_timed_effects[request.code]
+        if existing then
+            -- Already active: extend the timer instead of re-applying (see
+            -- active_timed_effects' comment for why re-applying would be
+            -- wrong here).
+            existing.deadline = os.clock() + effect_duration_seconds(request)
+            ok = true
+        else
+            local call_ok, apply_ok, revert = pcall(handler.apply, request)
+            ok = call_ok and apply_ok and true or false
+            if ok and revert then
+                active_timed_effects[request.code] = {
+                    revert = revert,
+                    deadline = os.clock() + effect_duration_seconds(request),
+                }
+            end
+        end
     end
+
     send_response(request.id, ok)
 end
 
@@ -120,10 +420,13 @@ end
 
 function update_crowdcontrol()
     --[[Drives the whole connection: reconnects to the Crowd Control app on a
-    timer while disconnected, otherwise drains any complete NUL-terminated
-    JSON messages off the socket and dispatches each to effect_handlers.
-    Call this every frame from _OnFrame -- mirrors kh1_lua_library's
-    update_text_boxes() pattern; harmless/no-op while disconnected.]]
+    timer while disconnected, reverts any timed effects whose deadline has
+    passed, and otherwise drains any complete NUL-terminated JSON messages
+    off the socket and dispatches each to effect_handlers. Call this every
+    frame from _OnFrame -- mirrors kh1_lua_library's update_text_boxes()
+    pattern.]]
+    update_timed_effects()
+
     if not socket_handle then
         local now = os.clock()
         if now >= next_reconnect_attempt then
@@ -164,5 +467,7 @@ end
 -- gets its own globals, so this doesn't collide with other installed mods'
 -- own _OnFrame.
 function _OnFrame()
-    update_crowdcontrol()
+    if canExecute then
+        update_crowdcontrol()
+    end
 end

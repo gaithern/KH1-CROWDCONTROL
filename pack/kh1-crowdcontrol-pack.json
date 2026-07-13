@@ -19,36 +19,148 @@
   "effects": {
     "game": {
       "sound_31": {
-        "name": {
-          "public": "Play Sound Effect"
-        },
+        "name": { "public": "Play Sound Effect" },
         "price": 25,
         "description": "Plays a known-safe KH1 sound effect.",
         "category": ["sound"]
       },
       "item_placeholder": {
-        "name": {
-          "public": "Give Item (TODO: placeholder)"
-        },
+        "name": { "public": "Give Item (TODO: placeholder)" },
         "price": 100,
         "description": "TODO: uses a placeholder item_id (see kh1_crowdcontrol.lua) -- do not enable for real redemptions until a verified-safe item_id is confirmed.",
         "category": ["item"],
         "inactive": true
       },
       "message": {
-        "name": {
-          "public": "Show Message"
-        },
+        "name": { "public": "Show Message" },
         "price": 50,
         "description": "Displays viewer-submitted text on screen for a few seconds.",
         "category": ["message"],
         "parameters": {
-          "text": {
-            "type": "string",
-            "label": "Message"
-          }
+          "text": { "type": "string", "label": "Message" }
         }
-      }
+      },
+
+      "force_scan": {
+        "name": { "public": "Force Scan" },
+        "price": 75,
+        "description": "Temporarily forces the Scan ability effect on, regardless of whether it's equipped.",
+        "category": ["toggle"],
+        "duration": { "value": 30 }
+      },
+      "force_combo_master": {
+        "name": { "public": "Force Combo Master" },
+        "price": 75,
+        "description": "Temporarily forces Combo Master behavior on.",
+        "category": ["toggle"],
+        "duration": { "value": 30 }
+      },
+      "summon_anywhere": {
+        "name": { "public": "Summon Anywhere" },
+        "price": 75,
+        "description": "Temporarily allows summoning anywhere, regardless of the normal restriction.",
+        "category": ["toggle"],
+        "duration": { "value": 30 }
+      },
+      "midair_dodge_guard": {
+        "name": { "public": "Midair Dodge Roll / Guard" },
+        "price": 75,
+        "description": "Temporarily allows Dodge Roll and Guard to be used in midair.",
+        "category": ["toggle"],
+        "duration": { "value": 30 }
+      },
+      "air_items": {
+        "name": { "public": "Air Items" },
+        "price": 75,
+        "description": "Temporarily allows items to be used while airborne.",
+        "category": ["toggle"],
+        "duration": { "value": 30 }
+      },
+
+      "mega_combos": {
+        "name": { "public": "Mega Combos" },
+        "price": 100,
+        "description": "Temporarily raises Sora's ground and air combo limits to 10.",
+        "category": ["combo"],
+        "duration": { "value": 30 }
+      },
+      "no_combos": {
+        "name": { "public": "No Combos" },
+        "price": 100,
+        "description": "Temporarily drops Sora's ground and air combo limits to 1 (no combo strings).",
+        "category": ["combo"],
+        "duration": { "value": 30 }
+      },
+
+      "slow_motion": {
+        "name": { "public": "Slow Motion" },
+        "price": 75,
+        "description": "Temporarily halves Sora's animation speed.",
+        "category": ["speed"],
+        "duration": { "value": 30 }
+      },
+      "hyper_speed": {
+        "name": { "public": "Hyper Speed" },
+        "price": 75,
+        "description": "Temporarily doubles Sora's animation speed.",
+        "category": ["speed"],
+        "duration": { "value": 30 }
+      },
+
+      "summon_time_half": {
+        "name": { "public": "Short Summons" },
+        "price": 60,
+        "description": "Temporarily halves summon duration.",
+        "category": ["summon"],
+        "duration": { "value": 45 }
+      },
+      "summon_time_double": {
+        "name": { "public": "Long Summons" },
+        "price": 60,
+        "description": "Temporarily doubles summon duration.",
+        "category": ["summon"],
+        "duration": { "value": 45 }
+      },
+
+      "magic_boost": {
+        "name": { "public": "Magic Boost" },
+        "price": 100,
+        "description": "EXPERIMENTAL, not live-verified: temporarily boosts every spell's effectiveness by 50%.",
+        "category": ["magic"],
+        "duration": { "value": 30 }
+      },
+      "magic_nerf": {
+        "name": { "public": "Magic Nerf" },
+        "price": 100,
+        "description": "EXPERIMENTAL, not live-verified: temporarily halves every spell's effectiveness.",
+        "category": ["magic"],
+        "duration": { "value": 30 }
+      },
+
+      "ability_vortex": { "name": { "public": "Grant: Vortex" }, "price": 150, "description": "Grants the Vortex ability effect.", "category": ["ability"] },
+      "ability_aerial_sweep": { "name": { "public": "Grant: Aerial Sweep" }, "price": 150, "description": "Grants the Aerial Sweep ability effect.", "category": ["ability"] },
+      "ability_counterattack": { "name": { "public": "Grant: Counterattack" }, "price": 150, "description": "Grants the Counterattack ability effect.", "category": ["ability"] },
+      "ability_blitz": { "name": { "public": "Grant: Blitz" }, "price": 150, "description": "Grants the Blitz ability effect.", "category": ["ability"] },
+      "ability_guard": { "name": { "public": "Grant: Guard" }, "price": 150, "description": "Grants the Guard ability effect.", "category": ["ability"] },
+      "ability_dodge_roll": { "name": { "public": "Grant: Dodge Roll" }, "price": 150, "description": "Grants the Dodge Roll ability effect.", "category": ["ability"] },
+      "ability_cheer": { "name": { "public": "Grant: Cheer" }, "price": 150, "description": "Grants the Cheer ability effect.", "category": ["ability"] },
+      "ability_slapshot": { "name": { "public": "Grant: Slapshot" }, "price": 150, "description": "Grants the Slapshot ability effect.", "category": ["ability"] },
+      "ability_sliding_dash": { "name": { "public": "Grant: Sliding Dash" }, "price": 150, "description": "Grants the Sliding Dash ability effect.", "category": ["ability"] },
+      "ability_hurricane_blast": { "name": { "public": "Grant: Hurricane Blast" }, "price": 150, "description": "Grants the Hurricane Blast ability effect.", "category": ["ability"] },
+      "ability_ripple_drive": { "name": { "public": "Grant: Ripple Drive" }, "price": 150, "description": "Grants the Ripple Drive ability effect.", "category": ["ability"] },
+      "ability_stun_impact": { "name": { "public": "Grant: Stun Impact" }, "price": 150, "description": "Grants the Stun Impact ability effect.", "category": ["ability"] },
+      "ability_gravity_break": { "name": { "public": "Grant: Gravity Break" }, "price": 150, "description": "Grants the Gravity Break ability effect.", "category": ["ability"] },
+      "ability_zantetsuken": { "name": { "public": "Grant: Zantetsuken" }, "price": 150, "description": "Grants the Zantetsuken ability effect.", "category": ["ability"] },
+      "ability_sonic_blade": { "name": { "public": "Grant: Sonic Blade" }, "price": 150, "description": "Grants the Sonic Blade ability effect.", "category": ["ability"] },
+      "ability_ars_arcanum": { "name": { "public": "Grant: Ars Arcanum" }, "price": 150, "description": "Grants the Ars Arcanum ability effect.", "category": ["ability"] },
+      "ability_strike_raid": { "name": { "public": "Grant: Strike Raid" }, "price": 150, "description": "Grants the Strike Raid ability effect.", "category": ["ability"] },
+      "ability_ragnarok": { "name": { "public": "Grant: Ragnarok" }, "price": 150, "description": "Grants the Ragnarok ability effect.", "category": ["ability"] },
+      "ability_trinity_limit": { "name": { "public": "Grant: Trinity Limit" }, "price": 150, "description": "Grants the Trinity Limit ability effect.", "category": ["ability"] },
+      "ability_mp_haste": { "name": { "public": "Grant: MP Haste" }, "price": 150, "description": "Grants the MP Haste ability effect.", "category": ["ability"] },
+      "ability_mp_rage": { "name": { "public": "Grant: MP Rage" }, "price": 150, "description": "Grants the MP Rage ability effect.", "category": ["ability"] },
+      "ability_second_chance": { "name": { "public": "Grant: Second Chance" }, "price": 150, "description": "Grants the Second Chance ability effect.", "category": ["ability"] },
+      "ability_berserk": { "name": { "public": "Grant: Berserk" }, "price": 150, "description": "Grants the Berserk ability effect.", "category": ["ability"] },
+      "ability_leaf_bracer": { "name": { "public": "Grant: Leaf Bracer" }, "price": 150, "description": "Grants the Leaf Bracer ability effect.", "category": ["ability"] }
     }
   }
 }
