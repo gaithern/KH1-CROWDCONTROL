@@ -30,16 +30,16 @@
 //     id/code/type/status/duration/parameters) matches
 //     scripts/kh1_crowdcontrol.lua already, per Crowd Control's SimpleJSON
 //     structure reference.
+//   - `ParameterDef`/`Parameter` is the real "pick one option from a list"
+//     API (Crowd Control's team confirmed on Discord there is NO free-text
+//     input at all on this connector, only a numeric Quantity slider and
+//     Parameters) -- confirmed against WarpWorld/CCPack-PC-DeepRockGalactic's
+//     real, working usage. See MessagePreset below: `message` was reworked
+//     from a free-text idea into a preset-list picker.
 //
 // Still NOT confirmed -- this loads clean, but hasn't been tested against a
 // live effect redemption yet (use the SDK's "Test Effects" tab, or an
 // actual Crowd Control session, with the KH1 mod running and connected):
-//   - The `message` effect's viewer-submitted free text has no confirmed
-//     Effect-parameter equivalent in the SDK -- Crowd Control's parameter
-//     system is documented for effect variants/targets, not arbitrary text
-//     input, so it's left as a plain instant effect below pending
-//     verification. If free text isn't supported this way, this effect may
-//     need to be dropped or reworked.
 //   - The `give_*` item effects use item_ids cross-confirmed against
 //     KH-1FM-AP-LUA's write_item() and KH1-RANDOMIZER's gift-table encoding
 //     (both of which run against real KH1FM), but NEITHER confirms
@@ -104,6 +104,36 @@ namespace CrowdControl.Games.Packs.KH1CrowdControl
         private const string SummonFolder = "Summons";
         private const string MagicFolder = "Magic";
         private const string AbilityFolder = "Abilities";
+
+        // Confirmed against WarpWorld/CCPack-PC-DeepRockGalactic's real,
+        // working `ParameterDef`/`Parameter` usage (`new("Target Player",
+        // "targetPlayerType", new Parameter("Host", "1"), ...)`, used as
+        // `Parameters = TargetsMain` on an Effect) -- this is Crowd
+        // Control's actual "pick one option from a list" mechanism, per the
+        // team's own Discord confirmation that free text isn't supported at
+        // all on this connector. The second constructor arg ("text") is the
+        // parameter's key, matching what kh1_crowdcontrol.lua's `message`
+        // handler reads via request.parameters.text; each Parameter's
+        // second arg is the actual value sent through on selection -- set
+        // equal to its own display label here so the value IS the message.
+        private readonly ParameterDef MessagePreset = new("Message", "text",
+            new Parameter("GG", "GG"),
+            new Parameter("Nice!", "Nice!"),
+            new Parameter("Oops!", "Oops!"),
+            new Parameter("Uh oh...", "Uh oh..."),
+            new Parameter("Nooo!", "Nooo!"),
+            new Parameter("Yay!", "Yay!"),
+            new Parameter("Hello!", "Hello!"),
+            new Parameter("Whoops!", "Whoops!"),
+            new Parameter("So true", "So true"),
+            new Parameter("Skill issue", "Skill issue"),
+            new Parameter("Chaos!", "Chaos!"),
+            new Parameter("Good luck", "Good luck"),
+            new Parameter("Bad luck", "Bad luck"),
+            new Parameter("Try again", "Try again"),
+            new Parameter("W take", "W take"),
+            new Parameter("L take", "L take")
+        );
 
         // Confirmed against Balatro.cs (compiler CS1715 also said as much):
         // the property type must be EffectList, not List<Effect> -- but
@@ -221,10 +251,11 @@ namespace CrowdControl.Games.Packs.KH1CrowdControl
             new Effect("Give Defense Up", "give_defense_up") {Category = ItemFolder, Price = 70, Description = "Spawns a Defense Up pickup near Sora."},
             new Effect("Give AP Up", "give_ap_up") {Category = ItemFolder, Price = 70, Description = "Spawns an AP Up pickup near Sora."},
 
-            // TODO(verify): free-text viewer parameter not yet confirmed
-            // against the SDK -- see file header note.
+            // Confirmed by Crowd Control's team on Discord: no free-text
+            // input on this connector, only Quantity and Parameters
+            // (pick-one-from-a-list/hex-color) -- see MessagePreset above.
             new Effect("Show Message", "message")
-                {Category = MessageFolder, Price = 50, Description = "Shows your text (15 characters max) in the item-pickup popup."},
+                {Category = MessageFolder, Price = 50, Parameters = MessagePreset, Description = "Shows a preset message in the item-pickup popup."},
 
             new Effect("Force Scan", "force_scan")
                 {Category = ToggleFolder, Price = 75, Duration = 30, Description = "Temporarily forces the Scan ability effect on, regardless of whether it's equipped."},

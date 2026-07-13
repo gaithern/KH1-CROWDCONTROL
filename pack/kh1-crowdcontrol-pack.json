@@ -114,10 +114,31 @@
       "message": {
         "name": { "public": "Show Message" },
         "price": 50,
-        "description": "Shows your text (15 characters max) in the item-pickup popup.",
+        "description": "Shows a preset message in the item-pickup popup.",
         "category": ["message"],
         "parameters": {
-          "text": { "type": "string", "label": "Message (15 char max)" }
+          "text": {
+            "type": "options",
+            "name": "Message",
+            "options": {
+              "gg": { "name": "GG" },
+              "nice": { "name": "Nice!" },
+              "oops": { "name": "Oops!" },
+              "uhoh": { "name": "Uh oh..." },
+              "nooo": { "name": "Nooo!" },
+              "yay": { "name": "Yay!" },
+              "hello": { "name": "Hello!" },
+              "whoops": { "name": "Whoops!" },
+              "sotrue": { "name": "So true" },
+              "skillissue": { "name": "Skill issue" },
+              "chaos": { "name": "Chaos!" },
+              "goodluck": { "name": "Good luck" },
+              "badluck": { "name": "Bad luck" },
+              "tryagain": { "name": "Try again" },
+              "wtake": { "name": "W take" },
+              "ltake": { "name": "L take" }
+            }
+          }
         }
       },
 

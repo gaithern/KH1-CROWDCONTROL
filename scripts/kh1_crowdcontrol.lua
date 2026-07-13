@@ -112,13 +112,18 @@ local effect_handlers = {
         end,
     },
 
-    -- Free-text effect: the redeemer's typed text is shown via the map-prize
-    -- pickup popup (kh1.show_custom_item_popup -- the small window that
-    -- normally names the item you just got, repurposed to show arbitrary
-    -- text). Switched from open_text_box, which wasn't working. Truncated to
-    -- 15 characters -- the popup's text field is a fixed-size display slot,
-    -- not a free-scrolling box, so longer input would either overflow or
-    -- get cut off unpredictably rather than cleanly.
+    -- Shows a PRESET message via the map-prize pickup popup
+    -- (kh1.show_custom_item_popup -- the small window that normally names
+    -- the item you just got, repurposed to show custom text). Originally
+    -- meant to be free-typed viewer text, but Crowd Control's team
+    -- confirmed on Discord (2026-07-13) the SimpleTCP C# pack SDK has NO
+    -- free-text input at all -- only a numeric Quantity slider and
+    -- Parameters (pick one option from a list, or a hex color). Reworked as
+    -- a preset-list picker instead (see MessagePreset in
+    -- pack/KH1CrowdControlPack.cs) -- request.parameters.text carries
+    -- whichever preset string the viewer picked, not free text. `:sub(1,
+    -- 15)` is defensive leftover truncation in case a future preset entry
+    -- is ever added over 15 chars; all current presets are already short.
     message = {
         apply = function(request)
             local text = request.parameters and request.parameters.text
