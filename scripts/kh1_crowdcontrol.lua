@@ -104,6 +104,8 @@ local effect_handlers = {
     -- The only play_se2 id confirmed live/audible so far (see
     -- kh1_lua_library.lua's play_se2 comment) -- expand this list only with
     -- ids you've verified live, per that function's crash-risk warning.
+    -- Kept as its own entry (rather than folded into the SOUND_EFFECTS loop
+    -- below) so this specific "confirmed good" status stays visible.
     sound_31 = {
         apply = function(request)
             return kh1.play_se2(31, 0)
@@ -318,6 +320,38 @@ for code, item_id in pairs(GIVE_ITEM_EFFECTS) do
             return kh1.spawn_prize(item_id)
         end,
     }
+end
+
+-- ####################### --
+-- # Sound effects (range)  # --
+-- ####################### --
+-- One discrete effect per se_id (sound_2..sound_76, excluding sound_31
+-- which already has its own entry above) rather than a single parameterized
+-- effect -- every real, currently-loadable Crowd Control C# pack checked
+-- while building this (WarpWorld/CCPack-PC-Balatro, TheUnknownCod3r/
+-- CCPack-PC-TCGCardShopSimulator) uses only static, discrete Effect
+-- declarations; no confirmed example of a numeric/free-input parameter
+-- exists anywhere in this SDK ecosystem, so this matches the established
+-- convention instead of guessing at an unconfirmed API (same reasoning
+-- already applied to ABILITY_EFFECTS/GIVE_ITEM_EFFECTS above).
+--
+-- Range 1-76 is carried over from a DIFFERENT, older calling mechanism
+-- (KH1-LUA-LIBRARY-DEV's code-cave injection driver) -- se_id=1 itself
+-- already crashed the game through THIS exact call path
+-- (kh1_native.call_function via play_se2), confirmed live 2026-07-12, so
+-- it's excluded below. Every OTHER id 2-76 (aside from 31) is UNTESTED
+-- through this function and may also crash -- a deliberate accepted
+-- tradeoff for redemption variety, not an oversight (see README).
+local SOUND_RANGE_MIN = 2
+local SOUND_RANGE_MAX = 76
+for se_id = SOUND_RANGE_MIN, SOUND_RANGE_MAX do
+    if se_id ~= 31 then
+        effect_handlers["sound_" .. se_id] = {
+            apply = function(request)
+                return kh1.play_se2(se_id, 0)
+            end,
+        }
+    end
 end
 
 -- ####################### --
