@@ -40,9 +40,12 @@
 //     input, so it's left as a plain instant effect below pending
 //     verification. If free text isn't supported this way, this effect may
 //     need to be dropped or reworked.
-//   - `item_placeholder` is deliberately left OUT of the Effects list below
-//     (not just marked inactive) until a verified-safe item_id replaces the
-//     placeholder -- see kh1_crowdcontrol.lua's own warning on this.
+//   - The `give_*` item effects use item_ids cross-confirmed against
+//     KH-1FM-AP-LUA's write_item() and KH1-RANDOMIZER's gift-table encoding
+//     (both of which run against real KH1FM), but NEITHER confirms
+//     fnc_spawn_prize itself accepts the same id space -- see the
+//     GIVE_ITEM_EFFECTS comment in kh1_crowdcontrol.lua. Deliberately
+//     limited to simple, non-progression consumables/stat-ups.
 //   - Every effect below still needs an actual live-fire test through the
 //     game -- see the status table in README.md.
 
