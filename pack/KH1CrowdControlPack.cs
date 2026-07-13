@@ -96,6 +96,7 @@ namespace CrowdControl.Games.Packs.KH1CrowdControl
         public override ushort Port { get; } = 43384;
 
         private const string SoundFolder = "Sound";
+        private const string ItemFolder = "Items";
         private const string MessageFolder = "Message";
         private const string ToggleFolder = "Toggles";
         private const string ComboFolder = "Combos";
@@ -115,6 +116,24 @@ namespace CrowdControl.Games.Packs.KH1CrowdControl
             // kh1_lua_library.lua's play_se2 comment before adding more.
             new Effect("Play Sound Effect", "sound_31")
                 {Category = SoundFolder, Price = 25, Description = "Plays a known-safe KH1 sound effect."},
+
+            // item_ids cross-confirmed against KH-1FM-AP-LUA/KH1-RANDOMIZER's
+            // native item-id encoding, but not yet against fnc_spawn_prize
+            // itself -- see kh1_crowdcontrol.lua's GIVE_ITEM_EFFECTS comment.
+            // Limited to simple consumables/stat-ups, no progression items.
+            new Effect("Give Potion", "give_potion") {Category = ItemFolder, Price = 40, Description = "Spawns a Potion pickup near Sora."},
+            new Effect("Give Hi-Potion", "give_hi_potion") {Category = ItemFolder, Price = 60, Description = "Spawns a Hi-Potion pickup near Sora."},
+            new Effect("Give Ether", "give_ether") {Category = ItemFolder, Price = 60, Description = "Spawns an Ether pickup near Sora."},
+            new Effect("Give Elixir", "give_elixir") {Category = ItemFolder, Price = 100, Description = "Spawns an Elixir pickup near Sora."},
+            new Effect("Give Mega-Potion", "give_mega_potion") {Category = ItemFolder, Price = 80, Description = "Spawns a Mega-Potion pickup near Sora."},
+            new Effect("Give Mega-Ether", "give_mega_ether") {Category = ItemFolder, Price = 80, Description = "Spawns a Mega-Ether pickup near Sora."},
+            new Effect("Give Megalixir", "give_megalixir") {Category = ItemFolder, Price = 120, Description = "Spawns a Megalixir pickup near Sora."},
+            new Effect("Give Tent", "give_tent") {Category = ItemFolder, Price = 50, Description = "Spawns a Tent pickup near Sora."},
+            new Effect("Give Camping Set", "give_camping_set") {Category = ItemFolder, Price = 60, Description = "Spawns a Camping Set pickup near Sora."},
+            new Effect("Give Cottage", "give_cottage") {Category = ItemFolder, Price = 90, Description = "Spawns a Cottage pickup near Sora."},
+            new Effect("Give Power Up", "give_power_up") {Category = ItemFolder, Price = 70, Description = "Spawns a Power Up pickup near Sora."},
+            new Effect("Give Defense Up", "give_defense_up") {Category = ItemFolder, Price = 70, Description = "Spawns a Defense Up pickup near Sora."},
+            new Effect("Give AP Up", "give_ap_up") {Category = ItemFolder, Price = 70, Description = "Spawns an AP Up pickup near Sora."},
 
             // TODO(verify): free-text viewer parameter not yet confirmed
             // against the SDK -- see file header note.

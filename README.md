@@ -49,14 +49,14 @@ local CC_PORT = 43384
 
 ## 4. Effects currently wired up
 
-See the `effect_handlers` table in `scripts/kh1_crowdcontrol.lua` (40 effects total) and the matching entries in `pack/KH1CrowdControlPack.cs`.
+See the `effect_handlers` table in `scripts/kh1_crowdcontrol.lua` (52 effects total) and the matching entries in `pack/KH1CrowdControlPack.cs`.
 
 **Timed effects** auto-revert: Crowd Control sends a `duration` (ms) with the request; the mod tracks a deadline per effect *code* (keyed by code, not per-redemption — see the `active_timed_effects` comment in the script for why) and reverts automatically via `_OnFrame`, falling back to 30s if no duration is given. A second redemption of an already-active effect just extends its timer rather than re-applying.
 
 | Effect code(s) | Does what | Status |
 |---|---|---|
 | `sound_31` | Plays KH1 sound effect id 31 | Confirmed live/audible |
-| `item_placeholder` | Spawns item id `1` near Sora via `spawn_prize` | **Disabled** (`inactive: true` in the pack) — placeholder id, not verified safe |
+| `give_potion`, `give_hi_potion`, `give_ether`, `give_elixir`, `give_mega_potion`, `give_mega_ether`, `give_megalixir`, `give_tent`, `give_camping_set`, `give_cottage`, `give_power_up`, `give_defense_up`, `give_ap_up` (13 effects) | Spawns a real, collectible pickup near Sora via `kh1.spawn_prize(item_id)` | Untested end-to-end — `item_id`s are cross-confirmed against two *other* mechanisms (KH-1FM-AP-LUA's inventory writer, KH1-RANDOMIZER's gift-table encoding), not against `fnc_spawn_prize` itself; limited to simple non-progression items until one is confirmed live |
 | `message` | Shows viewer-typed free text via `open_text_box` for 8 seconds | Untested end-to-end |
 | `force_scan`, `force_combo_master`, `summon_anywhere`, `midair_dodge_guard`, `air_items` | Toggle one of `kh1_lua_library`'s on/off gameplay patches on for 30s, then off | Untested end-to-end; the on/off values themselves are from the existing library |
 | `mega_combos` / `no_combos` | Sets ground+air combo limit to 10 / 1 for 30s, restores the real captured original after | Untested end-to-end |
@@ -65,7 +65,7 @@ See the `effect_handlers` table in `scripts/kh1_crowdcontrol.lua` (40 effects to
 | `magic_boost` / `magic_nerf` | Multiplies every spell's effectiveness byte by 1.5 / 0.5 for 30s, restores captured originals after | **Experimental** — `set_spell_effectiveness` has no documented safe value range anywhere in `kh1_lua_library`; scaling the current value (rather than writing a guessed constant) should be low-risk but hasn't been confirmed live |
 | `ability_*` (24 effects, one per named ability in `enable_ability`) | Grants that ability effect via `kh1.enable_ability("...")` | One-shot, **permanent** — there's no matching disable, so nothing to revert to |
 
-Only `se_id` values you've personally confirmed live should ever be added to `effect_handlers` — `play_se2`'s own comment in `kh1_lua_library.lua` documents at least one id that crashed the game outright. Same caution applies to `spawn_prize`'s `item_id`: a wrong id has been observed corrupting the pickup icon's animation rather than failing cleanly.
+Only `se_id` values you've personally confirmed live should ever be added to `effect_handlers` — `play_se2`'s own comment in `kh1_lua_library.lua` documents at least one id that crashed the game outright. `spawn_prize`'s own doc comment separately warns against chaining the game's claim/display sequence (`fnc_update_widget_queue`, EVDL 0x170/0x16F) after it — that pair's second argument is actually a pop-in-animation duration, not an item id, and feeding it one there corrupts the pickup icon's scale animation; `spawn_prize` deliberately never calls that pair, so this doesn't affect the `give_*` effects above, but don't add code that does call it with an item_id.
 
 Message text comes straight from the Crowd Control redemption with no filtering — moderate at the Crowd Control-effect level (per-effect cooldowns/blocklists in the app) if that matters for your stream.
 

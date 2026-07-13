@@ -24,13 +24,19 @@
         "description": "Plays a known-safe KH1 sound effect.",
         "category": ["sound"]
       },
-      "item_placeholder": {
-        "name": { "public": "Give Item (TODO: placeholder)" },
-        "price": 100,
-        "description": "TODO: uses a placeholder item_id (see kh1_crowdcontrol.lua) -- do not enable for real redemptions until a verified-safe item_id is confirmed.",
-        "category": ["item"],
-        "inactive": true
-      },
+      "give_potion": { "name": { "public": "Give Potion" }, "price": 40, "description": "Spawns a Potion pickup near Sora.", "category": ["item"] },
+      "give_hi_potion": { "name": { "public": "Give Hi-Potion" }, "price": 60, "description": "Spawns a Hi-Potion pickup near Sora.", "category": ["item"] },
+      "give_ether": { "name": { "public": "Give Ether" }, "price": 60, "description": "Spawns an Ether pickup near Sora.", "category": ["item"] },
+      "give_elixir": { "name": { "public": "Give Elixir" }, "price": 100, "description": "Spawns an Elixir pickup near Sora.", "category": ["item"] },
+      "give_mega_potion": { "name": { "public": "Give Mega-Potion" }, "price": 80, "description": "Spawns a Mega-Potion pickup near Sora.", "category": ["item"] },
+      "give_mega_ether": { "name": { "public": "Give Mega-Ether" }, "price": 80, "description": "Spawns a Mega-Ether pickup near Sora.", "category": ["item"] },
+      "give_megalixir": { "name": { "public": "Give Megalixir" }, "price": 120, "description": "Spawns a Megalixir pickup near Sora.", "category": ["item"] },
+      "give_tent": { "name": { "public": "Give Tent" }, "price": 50, "description": "Spawns a Tent pickup near Sora.", "category": ["item"] },
+      "give_camping_set": { "name": { "public": "Give Camping Set" }, "price": 60, "description": "Spawns a Camping Set pickup near Sora.", "category": ["item"] },
+      "give_cottage": { "name": { "public": "Give Cottage" }, "price": 90, "description": "Spawns a Cottage pickup near Sora.", "category": ["item"] },
+      "give_power_up": { "name": { "public": "Give Power Up" }, "price": 70, "description": "Spawns a Power Up pickup near Sora.", "category": ["item"] },
+      "give_defense_up": { "name": { "public": "Give Defense Up" }, "price": 70, "description": "Spawns a Defense Up pickup near Sora.", "category": ["item"] },
+      "give_ap_up": { "name": { "public": "Give AP Up" }, "price": 70, "description": "Spawns an AP Up pickup near Sora.", "category": ["item"] },
       "message": {
         "name": { "public": "Show Message" },
         "price": 50,
