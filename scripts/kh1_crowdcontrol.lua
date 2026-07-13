@@ -331,44 +331,44 @@ end
 -- only a numeric Quantity slider and Parameters (pick one option from a
 -- list, or a hex color).
 --
--- CONFIRMED against a real logged request (2026-07-13): a Parameters-based
--- effect arrives as the base code with a NESTED parameters object --
--- {"code":"message","parameters":{"text":{"value":"gg","title":"Message",
--- "type":"options"}}} -- NOT a compound "message_gg" code (an earlier
--- attempt guessed compound codes from the SDK's own Output-panel display
--- text, which turned out to just be a UI label, not the real wire code).
--- `.value` is the selected Parameter's second constructor arg from
--- MessagePreset (pack/KH1CrowdControlPack.cs) -- MESSAGE_PRESETS keys here
--- must match those exactly.
+-- Tried a Parameters-based picker next (confirmed working wire shape:
+-- {"code":"message","parameters":{"text":{"value":"gg",...}}}), but
+-- live-tested (2026-07-13) Parameters-based effects turned out to have some
+-- kind of much longer effective retrigger cooldown (~60s) independent of an
+-- explicit low SessionCooldown -- give_ap_up (no Parameters) retriggers
+-- instantly and repeatedly, message (Parameters-based) did not. Root cause
+-- not confirmed (Crowd Control's SDK/Test-Effects tool, not this repo's
+-- code or the game -- ruled out via KH1-LUA-LIBRARY-DEBUG retriggering the
+-- same underlying kh1.show_custom_item_popup call instantly). Reworked
+-- below as discrete per-message effects instead, matching the
+-- give_*/ability_* pattern that's already confirmed to retrigger fine --
+-- keys here must match the codes declared in pack/KH1CrowdControlPack.cs
+-- exactly.
 local MESSAGE_PRESETS = {
-    gg = "GG",
-    nice = "Nice!",
-    oops = "Oops!",
-    uhoh = "Uh oh...",
-    nooo = "Nooo!",
-    yay = "Yay!",
-    hello = "Hello!",
-    whoops = "Whoops!",
-    sotrue = "So true",
-    skillissue = "Skill issue",
-    chaos = "Chaos!",
-    goodluck = "Good luck",
-    badluck = "Bad luck",
-    tryagain = "Try again",
-    wtake = "W take",
-    ltake = "L take",
+    message_gg = "GG",
+    message_nice = "Nice!",
+    message_oops = "Oops!",
+    message_uhoh = "Uh oh...",
+    message_nooo = "Nooo!",
+    message_yay = "Yay!",
+    message_hello = "Hello!",
+    message_whoops = "Whoops!",
+    message_sotrue = "So true",
+    message_skillissue = "Skill issue",
+    message_chaos = "Chaos!",
+    message_goodluck = "Good luck",
+    message_badluck = "Bad luck",
+    message_tryagain = "Try again",
+    message_wtake = "W take",
+    message_ltake = "L take",
 }
-effect_handlers.message = {
-    apply = function(request)
-        local param = request.parameters and request.parameters.text
-        local key = param and param.value
-        local text = key and MESSAGE_PRESETS[key]
-        if not text then
-            return false
-        end
-        return kh1.show_custom_item_popup(text)
-    end,
-}
+for code, text in pairs(MESSAGE_PRESETS) do
+    effect_handlers[code] = {
+        apply = function(request)
+            return kh1.show_custom_item_popup(text)
+        end,
+    }
+end
 
 -- ####################### --
 -- # Sound effects (range)  # --
@@ -459,9 +459,9 @@ effect_handlers.magic_nerf = { apply = spell_effectiveness_effect(0.5) }
 -- set_attack_animation_data / set_command_data: raw array writes into
 --   engine tables with no documented safe shape/range -- highest guessed-risk
 --   functions in the library.
--- show_prompt: the `message` effect above already covers "show custom text"
---   more simply; show_prompt's multi-box/color parameter shape isn't worth
---   the extra complexity for the same end result.
+-- show_prompt: the MESSAGE_PRESETS effects above already cover "show custom
+--   text" more simply; show_prompt's multi-box/color parameter shape isn't
+--   worth the extra complexity for the same end result.
 -- make_sora_actionable: an unstick/debug utility, not really a chaos effect
 --   (no inverse action, nothing meaningful to revert).
 

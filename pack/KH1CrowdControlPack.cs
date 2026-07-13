@@ -34,8 +34,12 @@
 //     API (Crowd Control's team confirmed on Discord there is NO free-text
 //     input at all on this connector, only a numeric Quantity slider and
 //     Parameters) -- confirmed against WarpWorld/CCPack-PC-DeepRockGalactic's
-//     real, working usage. See MessagePreset below: `message` was reworked
-//     from a free-text idea into a preset-list picker.
+//     real, working usage. `message` briefly used this for a preset-list
+//     picker, but Parameters-based effects turned out to have some kind of
+//     much longer effective retrigger cooldown (~60s) independent of
+//     SessionCooldown -- see the comment above the Effects list for the
+//     live-tested comparison against `give_ap_up`. Reworked into discrete
+//     per-message effects instead (`message_gg`, `message_nice`, etc.).
 //
 // Still NOT confirmed -- this loads clean, but hasn't been tested against a
 // live effect redemption yet (use the SDK's "Test Effects" tab, or an
@@ -105,45 +109,22 @@ namespace CrowdControl.Games.Packs.KH1CrowdControl
         private const string MagicFolder = "Magic";
         private const string AbilityFolder = "Abilities";
 
-        // Confirmed against WarpWorld/CCPack-PC-DeepRockGalactic's real,
-        // working `ParameterDef`/`Parameter` usage (`new("Target Player",
-        // "targetPlayerType", new Parameter("Host", "1"), ...)`, used as
-        // `Parameters = TargetsMain` on an Effect) -- this is Crowd
-        // Control's actual "pick one option from a list" mechanism, per the
-        // team's own Discord confirmation that free text isn't supported at
-        // all on this connector.
-        //
-        // CONFIRMED against a real logged request (2026-07-13): the wire
-        // request for a Parameters-based effect IS just the base code with a
-        // nested parameters object -- {"code":"message","parameters":
-        // {"text":{"value":"gg","title":"Message","type":"options"}}} -- NOT
-        // a compound "message_gg" code. (An earlier attempt guessed compound
-        // codes from the SDK's own Output-panel display text, e.g.
-        // "[message_GG]" -- that turned out to just be a UI label, not the
-        // real wire code; reverted.) kh1_crowdcontrol.lua reads
-        // request.parameters.text.value and looks it up in its own
-        // MESSAGE_PRESETS table. Each Parameter's second arg (the value)
-        // just needs to match a MESSAGE_PRESETS key there -- kept as short
-        // lowercase identifiers here for clarity, not because the wire
-        // format requires it.
-        private readonly ParameterDef MessagePreset = new("Message", "text",
-            new Parameter("GG", "gg"),
-            new Parameter("Nice!", "nice"),
-            new Parameter("Oops!", "oops"),
-            new Parameter("Uh oh...", "uhoh"),
-            new Parameter("Nooo!", "nooo"),
-            new Parameter("Yay!", "yay"),
-            new Parameter("Hello!", "hello"),
-            new Parameter("Whoops!", "whoops"),
-            new Parameter("So true", "sotrue"),
-            new Parameter("Skill issue", "skillissue"),
-            new Parameter("Chaos!", "chaos"),
-            new Parameter("Good luck", "goodluck"),
-            new Parameter("Bad luck", "badluck"),
-            new Parameter("Try again", "tryagain"),
-            new Parameter("W take", "wtake"),
-            new Parameter("L take", "ltake")
-        );
+        // `Parameters`/`ParameterDef` (Crowd Control's real "pick one option
+        // from a list" mechanism -- confirmed against
+        // WarpWorld/CCPack-PC-DeepRockGalactic's working usage, and the team
+        // confirmed on Discord there's no free-text input at all on this
+        // connector) turned out to have some kind of much longer effective
+        // cooldown specific to Parameters-based effects (~60s, regardless of
+        // an explicit low `SessionCooldown`) -- live-tested 2026-07-13:
+        // `give_ap_up` (no Parameters) retriggers instantly and repeatedly,
+        // `message` (Parameters-based) did not, even with
+        // `SessionCooldown = 3` set. Root cause not confirmed (Crowd
+        // Control's SDK/Test-Effects tool, not this repo's code or the
+        // game -- ruled out via KH1-LUA-LIBRARY-DEBUG retriggering the same
+        // underlying kh1.show_custom_item_popup call instantly). Reworked
+        // below as discrete per-message effects instead, matching the
+        // give_*/ability_* pattern that's already confirmed to retrigger
+        // fine -- see MESSAGE_PRESETS in kh1_crowdcontrol.lua.
 
         // Confirmed against Balatro.cs (compiler CS1715 also said as much):
         // the property type must be EffectList, not List<Effect> -- but
@@ -153,7 +134,8 @@ namespace CrowdControl.Games.Packs.KH1CrowdControl
         // property), NOT `{ get; } = ...` (field initializer) -- confirmed
         // against WarpWorld/CCPack-PC-DeepRockGalactic's real Effects
         // declaration: a field initializer can't reference another instance
-        // field (CS0236, hit here once MessagePreset was added below), but
+        // field (CS0236 -- hit this when a since-removed ParameterDef field
+        // was referenced from here via Parameters=), but
         // an expression-bodied property can since it's evaluated lazily on
         // each access rather than during construction.
         public override EffectList Effects => new List<Effect>
@@ -267,18 +249,26 @@ namespace CrowdControl.Games.Packs.KH1CrowdControl
             new Effect("Give Defense Up", "give_defense_up") {Category = ItemFolder, Price = 70, Description = "Spawns a Defense Up pickup near Sora."},
             new Effect("Give AP Up", "give_ap_up") {Category = ItemFolder, Price = 70, Description = "Spawns an AP Up pickup near Sora."},
 
-            // Confirmed by Crowd Control's team on Discord: no free-text
-            // input on this connector, only Quantity and Parameters
-            // (pick-one-from-a-list/hex-color) -- see MessagePreset above.
-            // SessionCooldown=3 -- explains an earlier "worked once, then
-            // nothing for ~60s" observation: the SDK apparently applies its
-            // own default cooldown when this is left unset (confirmed real
-            // property, e.g. WarpWorld/CCPack-PC-DeepRockGalactic uses
-            // SessionCooldown=60 on a couple of its own effects). 3s is
-            // deliberately short since this is just a text popup, not
-            // something that needs spam protection.
-            new Effect("Show Message", "message")
-                {Category = MessageFolder, Price = 50, Parameters = MessagePreset, SessionCooldown = 3, Description = "Shows a preset message in the item-pickup popup."},
+            // Discrete per-message effects, not a Parameters-based picker --
+            // see the comment above this Effects list for why. Matches the
+            // give_*/ability_* pattern, which is confirmed to retrigger
+            // instantly and repeatedly with no cooldown weirdness.
+            new Effect("Show Message: GG", "message_gg") {Category = MessageFolder, Price = 50, Description = "Shows \"GG\" in the item-pickup popup."},
+            new Effect("Show Message: Nice!", "message_nice") {Category = MessageFolder, Price = 50, Description = "Shows \"Nice!\" in the item-pickup popup."},
+            new Effect("Show Message: Oops!", "message_oops") {Category = MessageFolder, Price = 50, Description = "Shows \"Oops!\" in the item-pickup popup."},
+            new Effect("Show Message: Uh oh...", "message_uhoh") {Category = MessageFolder, Price = 50, Description = "Shows \"Uh oh...\" in the item-pickup popup."},
+            new Effect("Show Message: Nooo!", "message_nooo") {Category = MessageFolder, Price = 50, Description = "Shows \"Nooo!\" in the item-pickup popup."},
+            new Effect("Show Message: Yay!", "message_yay") {Category = MessageFolder, Price = 50, Description = "Shows \"Yay!\" in the item-pickup popup."},
+            new Effect("Show Message: Hello!", "message_hello") {Category = MessageFolder, Price = 50, Description = "Shows \"Hello!\" in the item-pickup popup."},
+            new Effect("Show Message: Whoops!", "message_whoops") {Category = MessageFolder, Price = 50, Description = "Shows \"Whoops!\" in the item-pickup popup."},
+            new Effect("Show Message: So true", "message_sotrue") {Category = MessageFolder, Price = 50, Description = "Shows \"So true\" in the item-pickup popup."},
+            new Effect("Show Message: Skill issue", "message_skillissue") {Category = MessageFolder, Price = 50, Description = "Shows \"Skill issue\" in the item-pickup popup."},
+            new Effect("Show Message: Chaos!", "message_chaos") {Category = MessageFolder, Price = 50, Description = "Shows \"Chaos!\" in the item-pickup popup."},
+            new Effect("Show Message: Good luck", "message_goodluck") {Category = MessageFolder, Price = 50, Description = "Shows \"Good luck\" in the item-pickup popup."},
+            new Effect("Show Message: Bad luck", "message_badluck") {Category = MessageFolder, Price = 50, Description = "Shows \"Bad luck\" in the item-pickup popup."},
+            new Effect("Show Message: Try again", "message_tryagain") {Category = MessageFolder, Price = 50, Description = "Shows \"Try again\" in the item-pickup popup."},
+            new Effect("Show Message: W take", "message_wtake") {Category = MessageFolder, Price = 50, Description = "Shows \"W take\" in the item-pickup popup."},
+            new Effect("Show Message: L take", "message_ltake") {Category = MessageFolder, Price = 50, Description = "Shows \"L take\" in the item-pickup popup."},
 
             new Effect("Force Scan", "force_scan")
                 {Category = ToggleFolder, Price = 75, Duration = 30, Description = "Temporarily forces the Scan ability effect on, regardless of whether it's equipped."},
