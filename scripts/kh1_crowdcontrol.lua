@@ -280,6 +280,47 @@ for code, ability_name in pairs(ABILITY_EFFECTS) do
 end
 
 -- ####################### --
+-- # Item grants           # --
+-- ####################### --
+-- One-shot: spawns a real, collectible item pickup near Sora via
+-- kh1.spawn_prize(item_id) (see that function's own doc comment in
+-- kh1_lua_library.lua). item_ids below are the "regular item" offsets from
+-- KH1's own native item-id space -- cross-confirmed against
+-- KH-1FM-AP-LUA/1fmAPConnector.lua's write_item() (writes directly into the
+-- inventory byte array at this same offset) and
+-- KH1-RANDOMIZER/mod/scripts/1fmRandoGiftTable.lua's gift-table encoding
+-- (`{0xF0, item_id % 1000}`, where 0xF0 is the game's own "regular item"
+-- type marker), both of which actually run against real KH1FM -- but NEITHER
+-- confirms fnc_spawn_prize specifically accepts the same id space (a
+-- different native function: spawns a physical pickup entity, not a chest/
+-- gift grant or inventory write). Deliberately limited to simple,
+-- non-progression consumables/stat-ups -- no keyblades, accessories, world
+-- unlocks, or other story-relevant items -- to keep the blast radius small
+-- until at least one of these is confirmed live.
+local GIVE_ITEM_EFFECTS = {
+    give_potion = 1,
+    give_hi_potion = 2,
+    give_ether = 3,
+    give_elixir = 4,
+    give_mega_potion = 6,
+    give_mega_ether = 7,
+    give_megalixir = 8,
+    give_tent = 142,
+    give_camping_set = 143,
+    give_cottage = 144,
+    give_power_up = 152,
+    give_defense_up = 153,
+    give_ap_up = 154,
+}
+for code, item_id in pairs(GIVE_ITEM_EFFECTS) do
+    effect_handlers[code] = {
+        apply = function(request)
+            return kh1.spawn_prize(item_id)
+        end,
+    }
+end
+
+-- ####################### --
 -- # Magic effectiveness   # --
 -- ####################### --
 -- EXPERIMENTAL / not live-verified: set_spell_effectiveness has no
