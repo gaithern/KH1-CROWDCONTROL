@@ -112,15 +112,20 @@ local effect_handlers = {
         end,
     },
 
-    -- Free-text effect: the redeemer's typed text (Crowd Control text
-    -- parameter, see pack/kh1-crowdcontrol-pack.json) is shown as-is.
+    -- Free-text effect: the redeemer's typed text is shown via the map-prize
+    -- pickup popup (kh1.show_custom_item_popup -- the small window that
+    -- normally names the item you just got, repurposed to show arbitrary
+    -- text). Switched from open_text_box, which wasn't working. Truncated to
+    -- 15 characters -- the popup's text field is a fixed-size display slot,
+    -- not a free-scrolling box, so longer input would either overflow or
+    -- get cut off unpredictably rather than cleanly.
     message = {
         apply = function(request)
             local text = request.parameters and request.parameters.text
             if not text or text == "" then
                 return false
             end
-            return kh1.open_text_box(text, 1, 8)
+            return kh1.show_custom_item_popup(text:sub(1, 15))
         end,
     },
 

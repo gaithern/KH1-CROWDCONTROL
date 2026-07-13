@@ -224,7 +224,7 @@ namespace CrowdControl.Games.Packs.KH1CrowdControl
             // TODO(verify): free-text viewer parameter not yet confirmed
             // against the SDK -- see file header note.
             new Effect("Show Message", "message")
-                {Category = MessageFolder, Price = 50, Description = "Displays viewer-submitted text on screen for a few seconds."},
+                {Category = MessageFolder, Price = 50, Description = "Shows your text (15 characters max) in the item-pickup popup."},
 
             new Effect("Force Scan", "force_scan")
                 {Category = ToggleFolder, Price = 75, Duration = 30, Description = "Temporarily forces the Scan ability effect on, regardless of whether it's equipped."},

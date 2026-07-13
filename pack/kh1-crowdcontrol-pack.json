@@ -114,10 +114,10 @@
       "message": {
         "name": { "public": "Show Message" },
         "price": 50,
-        "description": "Displays viewer-submitted text on screen for a few seconds.",
+        "description": "Shows your text (15 characters max) in the item-pickup popup.",
         "category": ["message"],
         "parameters": {
-          "text": { "type": "string", "label": "Message" }
+          "text": { "type": "string", "label": "Message (15 char max)" }
         }
       },
 
