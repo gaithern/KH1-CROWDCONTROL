@@ -111,28 +111,37 @@ namespace CrowdControl.Games.Packs.KH1CrowdControl
         // `Parameters = TargetsMain` on an Effect) -- this is Crowd
         // Control's actual "pick one option from a list" mechanism, per the
         // team's own Discord confirmation that free text isn't supported at
-        // all on this connector. The second constructor arg ("text") is the
-        // parameter's key, matching what kh1_crowdcontrol.lua's `message`
-        // handler reads via request.parameters.text; each Parameter's
-        // second arg is the actual value sent through on selection -- set
-        // equal to its own display label here so the value IS the message.
+        // all on this connector.
+        //
+        // IMPORTANT (live-tested 2026-07-13): a Parameters-based effect does
+        // NOT arrive on the wire as code="message" + a separate parameters
+        // field -- Crowd Control synthesizes a COMPOUND code per option,
+        // "{baseCode}_{parameterValue}" (confirmed: selecting "GG" sent
+        // code="message_GG", not "message"). Functionally identical to
+        // hand-writing 16 separate Effects, just auto-generated from this
+        // list. kh1_crowdcontrol.lua matches on that compound code directly
+        // (see MESSAGE_PRESETS there) rather than reading a parameters
+        // field. Each Parameter's second arg (the value) MUST therefore be
+        // an identifier-safe suffix (no spaces/punctuation) -- the
+        // human-readable text lives in kh1_crowdcontrol.lua's own lookup
+        // table, keyed by these same suffixes, not here.
         private readonly ParameterDef MessagePreset = new("Message", "text",
-            new Parameter("GG", "GG"),
-            new Parameter("Nice!", "Nice!"),
-            new Parameter("Oops!", "Oops!"),
-            new Parameter("Uh oh...", "Uh oh..."),
-            new Parameter("Nooo!", "Nooo!"),
-            new Parameter("Yay!", "Yay!"),
-            new Parameter("Hello!", "Hello!"),
-            new Parameter("Whoops!", "Whoops!"),
-            new Parameter("So true", "So true"),
-            new Parameter("Skill issue", "Skill issue"),
-            new Parameter("Chaos!", "Chaos!"),
-            new Parameter("Good luck", "Good luck"),
-            new Parameter("Bad luck", "Bad luck"),
-            new Parameter("Try again", "Try again"),
-            new Parameter("W take", "W take"),
-            new Parameter("L take", "L take")
+            new Parameter("GG", "gg"),
+            new Parameter("Nice!", "nice"),
+            new Parameter("Oops!", "oops"),
+            new Parameter("Uh oh...", "uhoh"),
+            new Parameter("Nooo!", "nooo"),
+            new Parameter("Yay!", "yay"),
+            new Parameter("Hello!", "hello"),
+            new Parameter("Whoops!", "whoops"),
+            new Parameter("So true", "sotrue"),
+            new Parameter("Skill issue", "skillissue"),
+            new Parameter("Chaos!", "chaos"),
+            new Parameter("Good luck", "goodluck"),
+            new Parameter("Bad luck", "badluck"),
+            new Parameter("Try again", "tryagain"),
+            new Parameter("W take", "wtake"),
+            new Parameter("L take", "ltake")
         );
 
         // Confirmed against Balatro.cs (compiler CS1715 also said as much):

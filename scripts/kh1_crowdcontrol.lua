@@ -112,27 +112,6 @@ local effect_handlers = {
         end,
     },
 
-    -- Shows a PRESET message via the map-prize pickup popup
-    -- (kh1.show_custom_item_popup -- the small window that normally names
-    -- the item you just got, repurposed to show custom text). Originally
-    -- meant to be free-typed viewer text, but Crowd Control's team
-    -- confirmed on Discord (2026-07-13) the SimpleTCP C# pack SDK has NO
-    -- free-text input at all -- only a numeric Quantity slider and
-    -- Parameters (pick one option from a list, or a hex color). Reworked as
-    -- a preset-list picker instead (see MessagePreset in
-    -- pack/KH1CrowdControlPack.cs) -- request.parameters.text carries
-    -- whichever preset string the viewer picked, not free text. `:sub(1,
-    -- 15)` is defensive leftover truncation in case a future preset entry
-    -- is ever added over 15 chars; all current presets are already short.
-    message = {
-        apply = function(request)
-            local text = request.parameters and request.parameters.text
-            if not text or text == "" then
-                return false
-            end
-            return kh1.show_custom_item_popup(text:sub(1, 15))
-        end,
-    },
 
     -- ############### --
     -- # Toggles      # --
@@ -333,6 +312,51 @@ for code, item_id in pairs(GIVE_ITEM_EFFECTS) do
 end
 
 -- ####################### --
+-- # Message (preset list) # --
+-- ####################### --
+-- Shows a preset message via the map-prize pickup popup
+-- (kh1.show_custom_item_popup -- the small window that normally names the
+-- item you just got, repurposed to show custom text). Originally meant to
+-- be free-typed viewer text, but Crowd Control's team confirmed on Discord
+-- (2026-07-13) the SimpleTCP C# pack SDK has NO free-text input at all --
+-- only a numeric Quantity slider and Parameters (pick one option from a
+-- list, or a hex color).
+--
+-- IMPORTANT (live-tested 2026-07-13): a Parameters-based effect does NOT
+-- arrive on the wire as code="message" + a separate parameters field --
+-- Crowd Control synthesizes a COMPOUND code per option,
+-- "{baseCode}_{parameterValue}" (confirmed: selecting "GG" sent
+-- code="message_GG", not "message"). So this is keyed exactly like
+-- ABILITY_EFFECTS/GIVE_ITEM_EFFECTS above -- one discrete effect per preset
+-- -- rather than reading a parameters field. Keys here MUST match the
+-- Parameter values in MessagePreset (pack/KH1CrowdControlPack.cs) exactly.
+local MESSAGE_PRESETS = {
+    message_gg = "GG",
+    message_nice = "Nice!",
+    message_oops = "Oops!",
+    message_uhoh = "Uh oh...",
+    message_nooo = "Nooo!",
+    message_yay = "Yay!",
+    message_hello = "Hello!",
+    message_whoops = "Whoops!",
+    message_sotrue = "So true",
+    message_skillissue = "Skill issue",
+    message_chaos = "Chaos!",
+    message_goodluck = "Good luck",
+    message_badluck = "Bad luck",
+    message_tryagain = "Try again",
+    message_wtake = "W take",
+    message_ltake = "L take",
+}
+for code, text in pairs(MESSAGE_PRESETS) do
+    effect_handlers[code] = {
+        apply = function(request)
+            return kh1.show_custom_item_popup(text)
+        end,
+    }
+end
+
+-- ####################### --
 -- # Sound effects (range)  # --
 -- ####################### --
 -- One discrete effect per se_id (sound_2..sound_76, excluding sound_31
@@ -421,9 +445,9 @@ effect_handlers.magic_nerf = { apply = spell_effectiveness_effect(0.5) }
 -- set_attack_animation_data / set_command_data: raw array writes into
 --   engine tables with no documented safe shape/range -- highest guessed-risk
 --   functions in the library.
--- show_prompt: the `message` effect above already covers "show custom text"
---   more simply; show_prompt's multi-box/color parameter shape isn't worth
---   the extra complexity for the same end result.
+-- show_prompt: the MESSAGE_PRESETS effects above already cover "show custom
+--   text" more simply; show_prompt's multi-box/color parameter shape isn't
+--   worth the extra complexity for the same end result.
 -- make_sora_actionable: an unstick/debug utility, not really a chaos effect
 --   (no inverse action, nothing meaningful to revert).
 
@@ -472,10 +496,20 @@ local function send_response(request_id, ok)
 end
 
 local function handle_request(request)
+    -- TEMPORARY DEBUG LOGGING: prints the raw incoming request so the
+    -- actual wire shape of `parameters` (still not fully confirmed against
+    -- a real SimpleTCP session) can be seen directly instead of guessed.
+    -- Remove once request.parameters access throughout effect_handlers is
+    -- confirmed correct.
+    local log_ok, log_encoded = pcall(json.encode, request)
+    ConsolePrint(string.format("[Crowd Control] Received request: %s", log_ok and log_encoded or "<failed to encode>"))
+
     local handler = effect_handlers[request.code]
     local ok = false
 
-    if handler and handler.apply then
+    if not handler or not handler.apply then
+        ConsolePrint(string.format("[Crowd Control] No handler for code '%s'", tostring(request.code)))
+    else
         local existing = active_timed_effects[request.code]
         if existing then
             -- Already active: extend the timer instead of re-applying (see
@@ -485,6 +519,14 @@ local function handle_request(request)
             ok = true
         else
             local call_ok, apply_ok, revert = pcall(handler.apply, request)
+            if not call_ok then
+                -- apply_ok holds the error message here, not a boolean --
+                -- pcall's second return on failure is the error, not
+                -- apply_ok's normal meaning.
+                ConsolePrint(string.format("[Crowd Control] Effect '%s' errored: %s", tostring(request.code), tostring(apply_ok)))
+            elseif not apply_ok then
+                ConsolePrint(string.format("[Crowd Control] Effect '%s' handler returned false (bad input?)", tostring(request.code)))
+            end
             ok = call_ok and apply_ok and true or false
             if ok and revert then
                 active_timed_effects[request.code] = {
