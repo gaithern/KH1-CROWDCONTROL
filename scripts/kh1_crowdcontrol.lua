@@ -37,6 +37,7 @@ local CC_PORT = 43384 -- must match the port the Crowd Control app's SimpleTCP c
 local RECONNECT_INTERVAL_SECONDS = 5
 
 local socket_handle = nil
+local connecting_handle = nil -- non-nil while a non-blocking connect is in flight (see try_connect)
 local recv_buffer = ""
 local next_reconnect_attempt = 0
 
@@ -355,14 +356,18 @@ effect_handlers.magic_nerf = { apply = spell_effectiveness_effect(0.5) }
 -- # Connection    # --
 -- ############### --
 
+-- Starts a NON-BLOCKING connect (see cc_connect's own comment in
+-- dllmain.cpp -- a blocking connect here was observed causing multi-second
+-- game freezes on every reconnect attempt). This only kicks off the
+-- attempt; update_crowdcontrol polls cc_connect_status(connecting_handle)
+-- every frame until it resolves to "connected" or "failed".
 local function try_connect()
     local ok, handle_or_err = ccnet.cc_connect(CC_HOST, CC_PORT)
     if ok then
-        socket_handle = handle_or_err
-        recv_buffer = ""
-        ConsolePrint(string.format("[Crowd Control] Connected to %s:%d", CC_HOST, CC_PORT))
+        connecting_handle = handle_or_err
     else
-        socket_handle = nil
+        connecting_handle = nil
+        ConsolePrint(string.format("[Crowd Control] cc_connect failed: %s", tostring(handle_or_err)))
     end
 end
 
@@ -370,6 +375,10 @@ local function disconnect()
     if socket_handle then
         ccnet.cc_close(socket_handle)
         socket_handle = nil
+    end
+    if connecting_handle then
+        ccnet.cc_close(connecting_handle)
+        connecting_handle = nil
     end
     recv_buffer = ""
 end
@@ -426,6 +435,22 @@ function update_crowdcontrol()
     frame from _OnFrame -- mirrors kh1_lua_library's update_text_boxes()
     pattern.]]
     update_timed_effects()
+
+    if connecting_handle then
+        local status = ccnet.cc_connect_status(connecting_handle)
+        if status == "connected" then
+            socket_handle = connecting_handle
+            connecting_handle = nil
+            recv_buffer = ""
+            ConsolePrint(string.format("[Crowd Control] Connected to %s:%d", CC_HOST, CC_PORT))
+        elseif status == "failed" then
+            ccnet.cc_close(connecting_handle)
+            connecting_handle = nil
+            next_reconnect_attempt = os.clock() + RECONNECT_INTERVAL_SECONDS
+        end
+        -- status == "connecting": keep waiting, poll again next frame.
+        return
+    end
 
     if not socket_handle then
         local now = os.clock()

@@ -67,14 +67,20 @@ static bool EnsureWinsock() {
 
 // cc_connect(host, port) -> ok(boolean), handle(integer) | errorMessage(string)
 //
-// Deliberately a BLOCKING connect() call -- this is only ever used to reach
-// the Crowd Control app on the local machine (127.0.0.1/localhost), where a
-// loopback connect either succeeds or is refused near-instantly (no real
-// network round trip), so there's no risk of hanging the game's frame loop.
-// This sidesteps having to track "connection in progress" state for a
-// non-blocking connect, keeping this bridge as small as kh1_native.dll's.
-// The socket is switched to non-blocking immediately afterward, so all
-// subsequent cc_send/cc_recv calls never block.
+// Non-blocking connect: the socket is switched to non-blocking BEFORE
+// connect() is called, so connect() returns immediately regardless of
+// whether the Crowd Control app is actually listening yet. `ok=true` here
+// only means "connection attempt started", NOT "connected" -- callers must
+// poll cc_connect_status(handle) until it reports "connected" before using
+// cc_send/cc_recv.
+//
+// This used to be a deliberately blocking connect(), on the assumption that
+// a loopback (127.0.0.1) connect either succeeds or is refused near-
+// instantly. That assumption doesn't hold in practice -- observed causing
+// multi-second game freezes on every reconnect attempt (every
+// RECONNECT_INTERVAL_SECONDS) whenever the Crowd Control SDK/app wasn't yet
+// listening on the port, since a blocking connect() on the game's own frame
+// thread stalls the entire game for however long that connect takes.
 extern "C" int l_cc_connect(void* L) {
     if (!EnsureWinsock()) {
         p_lua_pushboolean(L, 0);
@@ -117,23 +123,80 @@ extern "C" int l_cc_connect(void* L) {
         return 2;
     }
 
-    if (connect(s, (sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
-        char msg[96];
-        snprintf(msg, sizeof(msg), "cc_connect: connect() failed, err=%d", WSAGetLastError());
-        LogDebug(msg);
-        closesocket(s);
-        p_lua_pushboolean(L, 0);
-        p_lua_pushstring(L, "cc_connect: connection refused or unreachable");
-        return 2;
-    }
-
+    // Switched to non-blocking BEFORE connect() (not after) -- this is what
+    // makes connect() itself return immediately instead of blocking.
     u_long nonBlocking = 1;
     ioctlsocket(s, FIONBIO, &nonBlocking);
 
-    LogDebug("cc_connect: connected");
+    if (connect(s, (sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
+        int err = WSAGetLastError();
+        if (err != WSAEWOULDBLOCK) {
+            char msg[96];
+            snprintf(msg, sizeof(msg), "cc_connect: connect() failed immediately, err=%d", err);
+            LogDebug(msg);
+            closesocket(s);
+            p_lua_pushboolean(L, 0);
+            p_lua_pushstring(L, "cc_connect: connection refused or unreachable");
+            return 2;
+        }
+        // WSAEWOULDBLOCK is the expected/normal case for a non-blocking
+        // connect that hasn't completed yet -- not a failure.
+    }
+
+    LogDebug("cc_connect: connect initiated (non-blocking), awaiting cc_connect_status");
     p_lua_pushboolean(L, 1);
     p_lua_pushinteger(L, (long long)s);
     return 2;
+}
+
+// cc_connect_status(handle) -> "connecting" | "connected" | "failed"
+// Polls a non-blocking connect() started by cc_connect using select() with
+// a zero timeout, so this never blocks either. Call this every frame while
+// "connecting" until it stops saying so.
+extern "C" int l_cc_connect_status(void* L) {
+    SOCKET s = (SOCKET)p_lua_tointegerx(L, 1, nullptr);
+
+    fd_set writeSet, exceptSet;
+    FD_ZERO(&writeSet);
+    FD_ZERO(&exceptSet);
+    FD_SET(s, &writeSet);
+    FD_SET(s, &exceptSet);
+
+    timeval zeroTimeout = { 0, 0 };
+    int result = select(0, nullptr, &writeSet, &exceptSet, &zeroTimeout);
+    if (result == SOCKET_ERROR) {
+        char msg[64];
+        snprintf(msg, sizeof(msg), "cc_connect_status: select() failed, err=%d", WSAGetLastError());
+        LogDebug(msg);
+        p_lua_pushstring(L, "failed");
+        return 1;
+    }
+
+    if (FD_ISSET(s, &exceptSet)) {
+        LogDebug("cc_connect_status: connect failed (exception set)");
+        p_lua_pushstring(L, "failed");
+        return 1;
+    }
+
+    if (FD_ISSET(s, &writeSet)) {
+        // Writable doesn't necessarily mean success -- double-check via
+        // SO_ERROR, same as the standard non-blocking-connect pattern.
+        int soError = 0;
+        int soErrorLen = sizeof(soError);
+        if (getsockopt(s, SOL_SOCKET, SO_ERROR, (char*)&soError, &soErrorLen) == SOCKET_ERROR || soError != 0) {
+            char msg[64];
+            snprintf(msg, sizeof(msg), "cc_connect_status: connect failed, SO_ERROR=%d", soError);
+            LogDebug(msg);
+            p_lua_pushstring(L, "failed");
+            return 1;
+        }
+        LogDebug("cc_connect_status: connected");
+        p_lua_pushstring(L, "connected");
+        return 1;
+    }
+
+    p_lua_pushstring(L, "connecting");
+    return 1;
 }
 
 // cc_send(handle, data) -> ok(boolean), errorMessage(string, only on failure)
@@ -209,6 +272,7 @@ extern "C" int l_cc_close(void* L) {
 
 static const luaL_Reg kh1_crowdcontrol_native_lib[] = {
     {"cc_connect", reinterpret_cast<void*>(l_cc_connect)},
+    {"cc_connect_status", reinterpret_cast<void*>(l_cc_connect_status)},
     {"cc_send", reinterpret_cast<void*>(l_cc_send)},
     {"cc_recv", reinterpret_cast<void*>(l_cc_recv)},
     {"cc_close", reinterpret_cast<void*>(l_cc_close)},
@@ -268,7 +332,7 @@ extern "C" __declspec(dllexport) int luaopen_kh1_crowdcontrol_native(void* L) {
         return 0;
     }
 
-    p_lua_createtable(L, 0, 4);
+    p_lua_createtable(L, 0, 5);
     p_luaL_setfuncs(L, kh1_crowdcontrol_native_lib, 0);
     return 1;
 }

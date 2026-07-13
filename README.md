@@ -43,7 +43,7 @@ local CC_PORT = 43384
 ```
 
 - `CC_PORT` must match whatever port you configure for this pack's SimpleTCP connector.
-- The mod retries the connection every 5 seconds if the Crowd Control app isn't up yet, so load order between the game and the app doesn't matter.
+- The mod retries the connection every 5 seconds if the Crowd Control app isn't up yet, so load order between the game and the app doesn't matter. The connect itself is non-blocking (`cc_connect` starts it, `cc_connect_status` is polled each frame until it resolves) — an earlier blocking version of this was observed causing multi-second game freezes on every reconnect attempt whenever the SDK app wasn't yet listening on the port.
 
 `pack/KH1CrowdControlPack.cs` is the game pack definition (effect list + connector config) for the Crowd Control side — a C# source file loaded into the Crowd Control **SDK** app (see Prerequisites) via its "Load Pack Source" pack editor, not JSON. It **loads clean** (no compiler errors, no QA warnings) as of 2026-07-13 — see the file's own header comment for exactly what that confirmed (the `ConnectorLib.SimpleTCP` namespace for `SimpleTCPServerConnector`, `Game(...)`'s real 4-argument signature, `Effects` needing to be typed `EffectList`) versus what's still untested (an actual live effect firing through the game). Once a live redemption is confirmed working, public listing requires reaching out on Crowd Control's Discord per their [SDK overview](https://developer.crowdcontrol.live/sdk/).
 
