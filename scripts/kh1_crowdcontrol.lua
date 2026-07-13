@@ -503,6 +503,25 @@ end
 local STATUS_SUCCESS = 0
 local STATUS_FAILURE = 1
 
+-- GameUpdate message (type 0xFD / 253) -- CONFIRMED (2026-07-13) required:
+-- "ready" is the only game state where Crowd Control will actually dispatch
+-- effects; without ever sending this, the SDK reported the connector as
+-- unable to reach "the game" even though the raw TCP socket was connected
+-- and receiving traffic fine (the 253-typed messages we were seeing FROM
+-- Crowd Control every few seconds appear to be its own side of this same
+-- message family, not just a plain ping -- see the SimpleJSON structure
+-- reference's Game State Updates section). Only ever sends "ready" -- this
+-- mod doesn't currently track finer-grained states (loading/paused/menu/
+-- cutscene/etc.) that a more complete integration might report.
+local GAME_UPDATE_TYPE = 253
+
+local function send_game_state(state)
+    if not socket_handle then return end
+    local msg = json.encode({ type = GAME_UPDATE_TYPE, state = state })
+    ccnet.cc_send(socket_handle, msg .. "\0")
+    log(string.format("Sent game state: %s", state))
+end
+
 local function send_response(request_id, ok)
     if not socket_handle then return end
     local response = json.encode({ id = request_id, type = 0, status = ok and STATUS_SUCCESS or STATUS_FAILURE })
@@ -587,6 +606,7 @@ function update_crowdcontrol()
             connecting_handle = nil
             recv_buffer = ""
             log(string.format("Connected to %s:%d", CC_HOST, CC_PORT))
+            send_game_state("ready")
         elseif status == "failed" then
             ccnet.cc_close(connecting_handle)
             connecting_handle = nil
