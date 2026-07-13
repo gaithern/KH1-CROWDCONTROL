@@ -1,0 +1,54 @@
+{
+  "meta": {
+    "name": {
+      "public": "Kingdom Hearts Final Mix (PC)",
+      "sort": "Kingdom Hearts Final Mix"
+    },
+    "platform": "PC",
+    "releaseDate": "2026-07-13",
+    "connector": ["SimpleTCP"],
+    "description": "Twitch Crowd Control effects for KH1 Final Mix (Steam/EGS PC), via KH1-CROWDCONTROL + KH1-LUA-LIBRARY.",
+    "simpleTCP": {
+      "role": "client",
+      "host": "127.0.0.1",
+      "port": 43384,
+      "authenticationMode": "None",
+      "encoding": "UTF8"
+    }
+  },
+  "effects": {
+    "game": {
+      "sound_31": {
+        "name": {
+          "public": "Play Sound Effect"
+        },
+        "price": 25,
+        "description": "Plays a known-safe KH1 sound effect.",
+        "category": ["sound"]
+      },
+      "item_placeholder": {
+        "name": {
+          "public": "Give Item (TODO: placeholder)"
+        },
+        "price": 100,
+        "description": "TODO: uses a placeholder item_id (see kh1_crowdcontrol.lua) -- do not enable for real redemptions until a verified-safe item_id is confirmed.",
+        "category": ["item"],
+        "inactive": true
+      },
+      "message": {
+        "name": {
+          "public": "Show Message"
+        },
+        "price": 50,
+        "description": "Displays viewer-submitted text on screen for a few seconds.",
+        "category": ["message"],
+        "parameters": {
+          "text": {
+            "type": "string",
+            "label": "Message"
+          }
+        }
+      }
+    }
+  }
+}
