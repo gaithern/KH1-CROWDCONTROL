@@ -270,8 +270,15 @@ namespace CrowdControl.Games.Packs.KH1CrowdControl
             // Confirmed by Crowd Control's team on Discord: no free-text
             // input on this connector, only Quantity and Parameters
             // (pick-one-from-a-list/hex-color) -- see MessagePreset above.
+            // SessionCooldown=3 -- explains an earlier "worked once, then
+            // nothing for ~60s" observation: the SDK apparently applies its
+            // own default cooldown when this is left unset (confirmed real
+            // property, e.g. WarpWorld/CCPack-PC-DeepRockGalactic uses
+            // SessionCooldown=60 on a couple of its own effects). 3s is
+            // deliberately short since this is just a text popup, not
+            // something that needs spam protection.
             new Effect("Show Message", "message")
-                {Category = MessageFolder, Price = 50, Parameters = MessagePreset, Description = "Shows a preset message in the item-pickup popup."},
+                {Category = MessageFolder, Price = 50, Parameters = MessagePreset, SessionCooldown = 3, Description = "Shows a preset message in the item-pickup popup."},
 
             new Effect("Force Scan", "force_scan")
                 {Category = ToggleFolder, Price = 75, Duration = 30, Description = "Temporarily forces the Scan ability effect on, regardless of whether it's equipped."},
