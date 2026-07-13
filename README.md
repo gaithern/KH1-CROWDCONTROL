@@ -51,7 +51,7 @@ local CC_PORT = 43384
 
 ## 4. Effects currently wired up
 
-See the `effect_handlers` table in `scripts/kh1_crowdcontrol.lua` (126 effects total) and the matching entries in `pack/KH1CrowdControlPack.cs`.
+See the `effect_handlers` table in `scripts/kh1_crowdcontrol.lua` (141 effects total) and the matching entries in `pack/KH1CrowdControlPack.cs`.
 
 **Timed effects** auto-revert: Crowd Control sends a `duration` (ms) with the request; the mod tracks a deadline per effect *code* (keyed by code, not per-redemption — see the `active_timed_effects` comment in the script for why) and reverts automatically via `_OnFrame`, falling back to 30s if no duration is given. A second redemption of an already-active effect just extends its timer rather than re-applying.
 
