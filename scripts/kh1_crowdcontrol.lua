@@ -110,16 +110,6 @@ local effect_handlers = {
         end,
     },
 
-    -- TODO: PLACEHOLDER item_id, not verified safe. spawn_prize's own
-    -- warning in kh1_lua_library.lua notes an unverified id can corrupt the
-    -- pickup icon's animation -- confirm a real, tested item_id before
-    -- enabling this effect for real redemptions.
-    item_placeholder = {
-        apply = function(request)
-            return kh1.spawn_prize(1)
-        end,
-    },
-
     -- Free-text effect: the redeemer's typed text (Crowd Control text
     -- parameter, see pack/kh1-crowdcontrol-pack.json) is shown as-is.
     message = {
