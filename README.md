@@ -80,7 +80,7 @@ See the comment block above `-- Deliberately NOT wired` in `scripts/kh1_crowdcon
 
 Both the game process and this mod log to files next to wherever the DLLs are loaded from:
 
-- `kh1_crowdcontrol_native.log` — connection attempts, socket errors.
+- `kh1_crowdcontrol_native.log` — connection attempts, socket errors, **and this mod's own status/diagnostic messages** (which effect fired, request payloads, handler errors — see `log()` in `kh1_crowdcontrol.lua`). Confirmed live 2026-07-13: `ConsolePrint` output isn't visible anywhere by default in this modding environment, so this mod routes everything through `ccnet.cc_log()` into this same file instead — don't rely on `ConsolePrint` for debugging.
 - `kh1_native.log` (from KH1-LUA-LIBRARY) — the underlying game-function calls (`play_se2`, `spawn_prize`, text box hooks).
 
-If effects never fire, check `kh1_crowdcontrol_native.log` first for whether the TCP connection to the Crowd Control app ever succeeded.
+If effects never fire, check `kh1_crowdcontrol_native.log` first for whether the TCP connection to the Crowd Control app ever succeeded, then for a `Received request: ...` line showing whether Crowd Control's request actually reached this mod and what `code` it carried.

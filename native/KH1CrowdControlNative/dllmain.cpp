@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdint>
+#include <string>
 
 #pragma comment(lib, "ws2_32.lib")
 
@@ -270,12 +271,29 @@ extern "C" int l_cc_close(void* L) {
     return 0;
 }
 
+// cc_log(msg) -> (none)
+// Appends `msg` to kh1_crowdcontrol_native.log (the same file this DLL's own
+// connection/socket logging already goes to -- see LogDebug above). Exists
+// because ConsolePrint output isn't visible anywhere by default in this
+// modding environment, so kh1_crowdcontrol.lua's own status/diagnostic
+// messages need a real, checkable-after-the-fact destination.
+extern "C" int l_cc_log(void* L) {
+    size_t len = 0;
+    const char* msg = p_lua_tolstring(L, 1, &len);
+    if (msg) {
+        std::string msgCopy(msg, len); // ensure NUL-termination for LogDebug's %s
+        LogDebug(msgCopy.c_str());
+    }
+    return 0;
+}
+
 static const luaL_Reg kh1_crowdcontrol_native_lib[] = {
     {"cc_connect", reinterpret_cast<void*>(l_cc_connect)},
     {"cc_connect_status", reinterpret_cast<void*>(l_cc_connect_status)},
     {"cc_send", reinterpret_cast<void*>(l_cc_send)},
     {"cc_recv", reinterpret_cast<void*>(l_cc_recv)},
     {"cc_close", reinterpret_cast<void*>(l_cc_close)},
+    {"cc_log", reinterpret_cast<void*>(l_cc_log)},
     {nullptr, nullptr}
 };
 
@@ -332,7 +350,7 @@ extern "C" __declspec(dllexport) int luaopen_kh1_crowdcontrol_native(void* L) {
         return 0;
     }
 
-    p_lua_createtable(L, 0, 5);
+    p_lua_createtable(L, 0, 6);
     p_luaL_setfuncs(L, kh1_crowdcontrol_native_lib, 0);
     return 1;
 }

@@ -41,6 +41,15 @@ local connecting_handle = nil -- non-nil while a non-blocking connect is in flig
 local recv_buffer = ""
 local next_reconnect_attempt = 0
 
+-- ConsolePrint output isn't visible anywhere by default in this modding
+-- environment (confirmed live 2026-07-13) -- everything this mod logs goes
+-- through cc_log instead, which appends to kh1_crowdcontrol_native.log
+-- (the same file the native DLL's own connection/socket logging already
+-- uses -- see README's Troubleshooting section).
+local function log(msg)
+    ccnet.cc_log("[Crowd Control] " .. msg)
+end
+
 -- ####################### --
 -- # Timed-effect tracking # --
 -- ####################### --
@@ -466,7 +475,7 @@ local function try_connect()
         connecting_handle = handle_or_err
     else
         connecting_handle = nil
-        ConsolePrint(string.format("[Crowd Control] cc_connect failed: %s", tostring(handle_or_err)))
+        log(string.format("cc_connect failed: %s", tostring(handle_or_err)))
     end
 end
 
@@ -502,13 +511,13 @@ local function handle_request(request)
     -- Remove once request.parameters access throughout effect_handlers is
     -- confirmed correct.
     local log_ok, log_encoded = pcall(json.encode, request)
-    ConsolePrint(string.format("[Crowd Control] Received request: %s", log_ok and log_encoded or "<failed to encode>"))
+    log(string.format("Received request: %s", log_ok and log_encoded or "<failed to encode>"))
 
     local handler = effect_handlers[request.code]
     local ok = false
 
     if not handler or not handler.apply then
-        ConsolePrint(string.format("[Crowd Control] No handler for code '%s'", tostring(request.code)))
+        log(string.format("No handler for code '%s'", tostring(request.code)))
     else
         local existing = active_timed_effects[request.code]
         if existing then
@@ -523,9 +532,11 @@ local function handle_request(request)
                 -- apply_ok holds the error message here, not a boolean --
                 -- pcall's second return on failure is the error, not
                 -- apply_ok's normal meaning.
-                ConsolePrint(string.format("[Crowd Control] Effect '%s' errored: %s", tostring(request.code), tostring(apply_ok)))
+                log(string.format("Effect '%s' errored: %s", tostring(request.code), tostring(apply_ok)))
             elseif not apply_ok then
-                ConsolePrint(string.format("[Crowd Control] Effect '%s' handler returned false (bad input?)", tostring(request.code)))
+                log(string.format("Effect '%s' handler returned false (bad input?)", tostring(request.code)))
+            else
+                log(string.format("Effect '%s' handler returned true (apply call succeeded)", tostring(request.code)))
             end
             ok = call_ok and apply_ok and true or false
             if ok and revert then
@@ -559,7 +570,7 @@ function update_crowdcontrol()
             socket_handle = connecting_handle
             connecting_handle = nil
             recv_buffer = ""
-            ConsolePrint(string.format("[Crowd Control] Connected to %s:%d", CC_HOST, CC_PORT))
+            log(string.format("Connected to %s:%d", CC_HOST, CC_PORT))
         elseif status == "failed" then
             ccnet.cc_close(connecting_handle)
             connecting_handle = nil
@@ -580,7 +591,7 @@ function update_crowdcontrol()
 
     local data, err = ccnet.cc_recv(socket_handle)
     if data == nil then
-        ConsolePrint(string.format("[Crowd Control] Connection lost (%s), will retry", tostring(err)))
+        log(string.format("Connection lost (%s), will retry", tostring(err)))
         disconnect()
         return
     end
