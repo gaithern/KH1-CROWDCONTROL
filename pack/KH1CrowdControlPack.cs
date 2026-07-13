@@ -113,18 +113,19 @@ namespace CrowdControl.Games.Packs.KH1CrowdControl
         // team's own Discord confirmation that free text isn't supported at
         // all on this connector.
         //
-        // IMPORTANT (live-tested 2026-07-13): a Parameters-based effect does
-        // NOT arrive on the wire as code="message" + a separate parameters
-        // field -- Crowd Control synthesizes a COMPOUND code per option,
-        // "{baseCode}_{parameterValue}" (confirmed: selecting "GG" sent
-        // code="message_GG", not "message"). Functionally identical to
-        // hand-writing 16 separate Effects, just auto-generated from this
-        // list. kh1_crowdcontrol.lua matches on that compound code directly
-        // (see MESSAGE_PRESETS there) rather than reading a parameters
-        // field. Each Parameter's second arg (the value) MUST therefore be
-        // an identifier-safe suffix (no spaces/punctuation) -- the
-        // human-readable text lives in kh1_crowdcontrol.lua's own lookup
-        // table, keyed by these same suffixes, not here.
+        // CONFIRMED against a real logged request (2026-07-13): the wire
+        // request for a Parameters-based effect IS just the base code with a
+        // nested parameters object -- {"code":"message","parameters":
+        // {"text":{"value":"gg","title":"Message","type":"options"}}} -- NOT
+        // a compound "message_gg" code. (An earlier attempt guessed compound
+        // codes from the SDK's own Output-panel display text, e.g.
+        // "[message_GG]" -- that turned out to just be a UI label, not the
+        // real wire code; reverted.) kh1_crowdcontrol.lua reads
+        // request.parameters.text.value and looks it up in its own
+        // MESSAGE_PRESETS table. Each Parameter's second arg (the value)
+        // just needs to match a MESSAGE_PRESETS key there -- kept as short
+        // lowercase identifiers here for clarity, not because the wire
+        // format requires it.
         private readonly ParameterDef MessagePreset = new("Message", "text",
             new Parameter("GG", "gg"),
             new Parameter("Nice!", "nice"),

@@ -111,22 +111,36 @@
       "give_power_up": { "name": { "public": "Give Power Up" }, "price": 70, "description": "Spawns a Power Up pickup near Sora.", "category": ["item"] },
       "give_defense_up": { "name": { "public": "Give Defense Up" }, "price": 70, "description": "Spawns a Defense Up pickup near Sora.", "category": ["item"] },
       "give_ap_up": { "name": { "public": "Give AP Up" }, "price": 70, "description": "Spawns an AP Up pickup near Sora.", "category": ["item"] },
-      "message_gg": { "name": { "public": "Show Message: GG" }, "price": 50, "description": "Shows \"GG\" in the item-pickup popup.", "category": ["message"] },
-      "message_nice": { "name": { "public": "Show Message: Nice!" }, "price": 50, "description": "Shows \"Nice!\" in the item-pickup popup.", "category": ["message"] },
-      "message_oops": { "name": { "public": "Show Message: Oops!" }, "price": 50, "description": "Shows \"Oops!\" in the item-pickup popup.", "category": ["message"] },
-      "message_uhoh": { "name": { "public": "Show Message: Uh oh..." }, "price": 50, "description": "Shows \"Uh oh...\" in the item-pickup popup.", "category": ["message"] },
-      "message_nooo": { "name": { "public": "Show Message: Nooo!" }, "price": 50, "description": "Shows \"Nooo!\" in the item-pickup popup.", "category": ["message"] },
-      "message_yay": { "name": { "public": "Show Message: Yay!" }, "price": 50, "description": "Shows \"Yay!\" in the item-pickup popup.", "category": ["message"] },
-      "message_hello": { "name": { "public": "Show Message: Hello!" }, "price": 50, "description": "Shows \"Hello!\" in the item-pickup popup.", "category": ["message"] },
-      "message_whoops": { "name": { "public": "Show Message: Whoops!" }, "price": 50, "description": "Shows \"Whoops!\" in the item-pickup popup.", "category": ["message"] },
-      "message_sotrue": { "name": { "public": "Show Message: So true" }, "price": 50, "description": "Shows \"So true\" in the item-pickup popup.", "category": ["message"] },
-      "message_skillissue": { "name": { "public": "Show Message: Skill issue" }, "price": 50, "description": "Shows \"Skill issue\" in the item-pickup popup.", "category": ["message"] },
-      "message_chaos": { "name": { "public": "Show Message: Chaos!" }, "price": 50, "description": "Shows \"Chaos!\" in the item-pickup popup.", "category": ["message"] },
-      "message_goodluck": { "name": { "public": "Show Message: Good luck" }, "price": 50, "description": "Shows \"Good luck\" in the item-pickup popup.", "category": ["message"] },
-      "message_badluck": { "name": { "public": "Show Message: Bad luck" }, "price": 50, "description": "Shows \"Bad luck\" in the item-pickup popup.", "category": ["message"] },
-      "message_tryagain": { "name": { "public": "Show Message: Try again" }, "price": 50, "description": "Shows \"Try again\" in the item-pickup popup.", "category": ["message"] },
-      "message_wtake": { "name": { "public": "Show Message: W take" }, "price": 50, "description": "Shows \"W take\" in the item-pickup popup.", "category": ["message"] },
-      "message_ltake": { "name": { "public": "Show Message: L take" }, "price": 50, "description": "Shows \"L take\" in the item-pickup popup.", "category": ["message"] },
+      "message": {
+        "name": { "public": "Show Message" },
+        "price": 50,
+        "description": "Shows a preset message in the item-pickup popup.",
+        "category": ["message"],
+        "parameters": {
+          "text": {
+            "type": "options",
+            "name": "Message",
+            "options": {
+              "gg": { "name": "GG" },
+              "nice": { "name": "Nice!" },
+              "oops": { "name": "Oops!" },
+              "uhoh": { "name": "Uh oh..." },
+              "nooo": { "name": "Nooo!" },
+              "yay": { "name": "Yay!" },
+              "hello": { "name": "Hello!" },
+              "whoops": { "name": "Whoops!" },
+              "sotrue": { "name": "So true" },
+              "skillissue": { "name": "Skill issue" },
+              "chaos": { "name": "Chaos!" },
+              "goodluck": { "name": "Good luck" },
+              "badluck": { "name": "Bad luck" },
+              "tryagain": { "name": "Try again" },
+              "wtake": { "name": "W take" },
+              "ltake": { "name": "L take" }
+            }
+          }
+        }
+      },
 
       "force_scan": {
         "name": { "public": "Force Scan" },

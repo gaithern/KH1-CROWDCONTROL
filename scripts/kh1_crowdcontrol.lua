@@ -331,39 +331,44 @@ end
 -- only a numeric Quantity slider and Parameters (pick one option from a
 -- list, or a hex color).
 --
--- IMPORTANT (live-tested 2026-07-13): a Parameters-based effect does NOT
--- arrive on the wire as code="message" + a separate parameters field --
--- Crowd Control synthesizes a COMPOUND code per option,
--- "{baseCode}_{parameterValue}" (confirmed: selecting "GG" sent
--- code="message_GG", not "message"). So this is keyed exactly like
--- ABILITY_EFFECTS/GIVE_ITEM_EFFECTS above -- one discrete effect per preset
--- -- rather than reading a parameters field. Keys here MUST match the
--- Parameter values in MessagePreset (pack/KH1CrowdControlPack.cs) exactly.
+-- CONFIRMED against a real logged request (2026-07-13): a Parameters-based
+-- effect arrives as the base code with a NESTED parameters object --
+-- {"code":"message","parameters":{"text":{"value":"gg","title":"Message",
+-- "type":"options"}}} -- NOT a compound "message_gg" code (an earlier
+-- attempt guessed compound codes from the SDK's own Output-panel display
+-- text, which turned out to just be a UI label, not the real wire code).
+-- `.value` is the selected Parameter's second constructor arg from
+-- MessagePreset (pack/KH1CrowdControlPack.cs) -- MESSAGE_PRESETS keys here
+-- must match those exactly.
 local MESSAGE_PRESETS = {
-    message_gg = "GG",
-    message_nice = "Nice!",
-    message_oops = "Oops!",
-    message_uhoh = "Uh oh...",
-    message_nooo = "Nooo!",
-    message_yay = "Yay!",
-    message_hello = "Hello!",
-    message_whoops = "Whoops!",
-    message_sotrue = "So true",
-    message_skillissue = "Skill issue",
-    message_chaos = "Chaos!",
-    message_goodluck = "Good luck",
-    message_badluck = "Bad luck",
-    message_tryagain = "Try again",
-    message_wtake = "W take",
-    message_ltake = "L take",
+    gg = "GG",
+    nice = "Nice!",
+    oops = "Oops!",
+    uhoh = "Uh oh...",
+    nooo = "Nooo!",
+    yay = "Yay!",
+    hello = "Hello!",
+    whoops = "Whoops!",
+    sotrue = "So true",
+    skillissue = "Skill issue",
+    chaos = "Chaos!",
+    goodluck = "Good luck",
+    badluck = "Bad luck",
+    tryagain = "Try again",
+    wtake = "W take",
+    ltake = "L take",
 }
-for code, text in pairs(MESSAGE_PRESETS) do
-    effect_handlers[code] = {
-        apply = function(request)
-            return kh1.show_custom_item_popup(text)
-        end,
-    }
-end
+effect_handlers.message = {
+    apply = function(request)
+        local param = request.parameters and request.parameters.text
+        local key = param and param.value
+        local text = key and MESSAGE_PRESETS[key]
+        if not text then
+            return false
+        end
+        return kh1.show_custom_item_popup(text)
+    end,
+}
 
 -- ####################### --
 -- # Sound effects (range)  # --
@@ -454,9 +459,9 @@ effect_handlers.magic_nerf = { apply = spell_effectiveness_effect(0.5) }
 -- set_attack_animation_data / set_command_data: raw array writes into
 --   engine tables with no documented safe shape/range -- highest guessed-risk
 --   functions in the library.
--- show_prompt: the MESSAGE_PRESETS effects above already cover "show custom
---   text" more simply; show_prompt's multi-box/color parameter shape isn't
---   worth the extra complexity for the same end result.
+-- show_prompt: the `message` effect above already covers "show custom text"
+--   more simply; show_prompt's multi-box/color parameter shape isn't worth
+--   the extra complexity for the same end result.
 -- make_sora_actionable: an unstick/debug utility, not really a chaos effect
 --   (no inverse action, nothing meaningful to revert).
 
@@ -512,6 +517,17 @@ local function handle_request(request)
     -- confirmed correct.
     local log_ok, log_encoded = pcall(json.encode, request)
     log(string.format("Received request: %s", log_ok and log_encoded or "<failed to encode>"))
+
+    -- Crowd Control sends non-effect protocol messages on this same
+    -- connection (observed live 2026-07-13: type=253, no `code` field at
+    -- all, roughly every few seconds -- almost certainly a ping/keepalive).
+    -- These aren't effect requests and must NOT get an effectResponse sent
+    -- back -- doing so was sending a bogus "failure" status for every one,
+    -- which likely contributed to the connection getting aborted
+    -- (WSAECONNABORTED/err=10053) shortly after a burst of them.
+    if request.code == nil then
+        return
+    end
 
     local handler = effect_handlers[request.code]
     local ok = false
