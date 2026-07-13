@@ -139,8 +139,14 @@ namespace CrowdControl.Games.Packs.KH1CrowdControl
         // the property type must be EffectList, not List<Effect> -- but
         // EffectList itself is still initialized with a plain
         // `new List<Effect> { ... }` collection initializer (implicit
-        // conversion), same as Balatro.cs does.
-        public override EffectList Effects { get; } = new List<Effect>
+        // conversion), same as Balatro.cs does. Uses `=>` (expression-bodied
+        // property), NOT `{ get; } = ...` (field initializer) -- confirmed
+        // against WarpWorld/CCPack-PC-DeepRockGalactic's real Effects
+        // declaration: a field initializer can't reference another instance
+        // field (CS0236, hit here once MessagePreset was added below), but
+        // an expression-bodied property can since it's evaluated lazily on
+        // each access rather than during construction.
+        public override EffectList Effects => new List<Effect>
         {
             // The only play_se2 id confirmed live/audible so far -- see
             // kh1_lua_library.lua's play_se2 comment before adding more.
