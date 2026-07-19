@@ -7,11 +7,11 @@ description: >-
   kh1_lua_library.lua, json.lua, and kh1_native.dll landing in the same
   scripts/io_packages folder.
 assets:
-- name: scripts/kh1_crowdcontrol.lua
-  method: copy
-  source:
-  - name: scripts/kh1_crowdcontrol.lua
 - name: scripts/io_packages/kh1_crowdcontrol_native.dll
   method: copy
   source:
   - name: scripts/io_packages/kh1_crowdcontrol_native.dll
+- name: scripts/kh1_crowdcontrol.lua
+  method: copy
+  source:
+  - name: scripts/kh1_crowdcontrol.lua
