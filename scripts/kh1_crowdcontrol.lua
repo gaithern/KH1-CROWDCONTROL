@@ -650,6 +650,15 @@ function update_crowdcontrol()
     end
 end
 
+-- The host's Lua loader warns ("the event handler for initialization either
+-- has errors or does not exist") if a top-level script never defines
+-- _OnInit -- every real script in KH1-RANDOMIZER's scripts/ folder has one.
+-- All of this mod's actual init work (VersionCheck's version detection,
+-- setting canExecute) already ran synchronously above via require()
+-- before this point, so there's nothing left to do here besides exist.
+function _OnInit()
+end
+
 -- This is a top-level scripts/ entry file (see header comment), not a
 -- required library, so it owns _OnFrame outright -- same plain global-function
 -- style as KH1-RANDOMIZER's scripts/1fmRandoClient.lua. Each top-level script
