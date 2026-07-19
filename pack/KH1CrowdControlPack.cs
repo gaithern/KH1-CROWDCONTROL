@@ -4,16 +4,16 @@ using ConnectorLib.SimpleTCP;
 using CrowdControl.Common;
 using CrowdControl.Games.Packs;
 
-namespace CrowdControl.Games.Packs.KH1CrowdControl
+namespace CrowdControl.Games.Packs.KH1FM
 {
-    public sealed class KH1CrowdControl : SimpleTCPPack<SimpleTCPServerConnector>
+    public sealed class KH1FM : SimpleTCPPack<SimpleTCPServerConnector>
     {
-        public KH1CrowdControl(UserRecord player, Func<CrowdControlBlock, bool> responseHandler,
+        public KH1FM(UserRecord player, Func<CrowdControlBlock, bool> responseHandler,
             Action<object> statusUpdateHandler) : base(player, responseHandler, statusUpdateHandler)
         {
         }
 
-        public override Game Game { get; } = new Game("KH1CrowdControl", "KH1CrowdControl",
+        public override Game Game { get; } = new Game("KH1FM", "KH1FM",
             "PC", ConnectorType.SimpleTCPServerConnector);
 
         // Must match CC_HOST / CC_PORT in scripts/kh1_crowdcontrol.lua.
