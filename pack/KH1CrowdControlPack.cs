@@ -23,6 +23,7 @@ namespace CrowdControl.Games.Packs.KH1FM
         private const string ItemFolder = "Items";
         private const string MessageFolder = "Message";
         private const string ComboFolder = "Combos";
+        private const string DangerFolder = "Danger";
 
         public override EffectList Effects => new List<Effect>
         {
@@ -59,6 +60,9 @@ namespace CrowdControl.Games.Packs.KH1FM
 
             new Effect("No Combos", "no_combos")
                 {Category = ComboFolder, Price = 100, Duration = 30, Description = "Temporarily drops Sora's ground and air combo limits to 1 (no combo strings)."},
+
+            new Effect("KO Sora", "ko_sora") {Category = DangerFolder, Price = 150, Description = "Instantly triggers Sora's real in-game KO sequence (death animation + Game Over)."},
+            new Effect("Heartless Angel", "heartless_angel_sora") {Category = DangerFolder, Price = 90, Description = "Drops Sora to 1 HP, same as Sephiroth's Heartless Angel move."},
         };
     }
 }

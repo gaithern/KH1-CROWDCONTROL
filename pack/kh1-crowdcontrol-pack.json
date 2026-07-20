@@ -54,7 +54,10 @@
         "description": "Temporarily drops Sora's ground and air combo limits to 1 (no combo strings).",
         "category": ["combo"],
         "duration": { "value": 30 }
-      }
+      },
+
+      "ko_sora": { "name": { "public": "KO Sora" }, "price": 150, "description": "Instantly triggers Sora's real in-game KO sequence (death animation + Game Over).", "category": ["danger"] },
+      "heartless_angel_sora": { "name": { "public": "Heartless Angel" }, "price": 90, "description": "Drops Sora to 1 HP, same as Sephiroth's Heartless Angel move.", "category": ["danger"] }
     }
   }
 }
