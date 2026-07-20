@@ -515,11 +515,26 @@ local STATUS_FAILURE = 1
 -- cutscene/etc.) that a more complete integration might report.
 local GAME_UPDATE_TYPE = 253
 
+-- Observed live 2026-07-20: the connection spontaneously closes and
+-- reconnects roughly every 1-2 minutes even while otherwise idle/healthy,
+-- and at least one lost effect request was traced to landing within ~2
+-- seconds of one of these cycles (request sent right as the old connection
+-- was torn down and replaced). Suspected cause: this mod previously sent
+-- "ready" exactly once, right after connecting, and never again -- if
+-- Crowd Control's connector expects a periodic liveness update rather than
+-- a one-time announcement, going quiet after the first one could be exactly
+-- what makes it decide the game side is stale and recycle the connection.
+-- Resending on a timer is a cheap thing to try before assuming this is
+-- unfixable from the mod side.
+local GAME_STATE_RESEND_INTERVAL_SECONDS = 10
+local next_game_state_send = 0
+
 local function send_game_state(state)
     if not socket_handle then return end
     local msg = json.encode({ type = GAME_UPDATE_TYPE, state = state })
     ccnet.cc_send(socket_handle, msg .. "\0")
     log(string.format("Sent game state: %s", state))
+    next_game_state_send = os.clock() + GAME_STATE_RESEND_INTERVAL_SECONDS
 end
 
 local function send_response(request_id, ok)
@@ -623,6 +638,10 @@ function update_crowdcontrol()
             try_connect()
         end
         return
+    end
+
+    if os.clock() >= next_game_state_send then
+        send_game_state("ready")
     end
 
     local data, err = ccnet.cc_recv(socket_handle)
