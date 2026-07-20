@@ -537,6 +537,15 @@ local function send_game_state(state)
     next_game_state_send = os.clock() + GAME_STATE_RESEND_INTERVAL_SECONDS
 end
 
+-- Reply to a SPECIFIC incoming GameUpdate request (echoes its `id`), as
+-- opposed to send_game_state's unprompted announcement -- see handle_request
+-- for why this distinction turned out to matter.
+local function send_game_state_reply(request_id, state)
+    if not socket_handle then return end
+    local msg = json.encode({ id = request_id, type = GAME_UPDATE_TYPE, state = state })
+    ccnet.cc_send(socket_handle, msg .. "\0")
+end
+
 local function send_response(request_id, ok)
     if not socket_handle then return end
     local response = json.encode({ id = request_id, type = 0, status = ok and STATUS_SUCCESS or STATUS_FAILURE })
@@ -552,13 +561,31 @@ local function handle_request(request)
     local log_ok, log_encoded = pcall(json.encode, request)
     log(string.format("Received request: %s", log_ok and log_encoded or "<failed to encode>"))
 
-    -- Crowd Control sends non-effect protocol messages on this same
-    -- connection (observed live 2026-07-13: type=253, no `code` field at
-    -- all, roughly every few seconds -- almost certainly a ping/keepalive).
-    -- These aren't effect requests and must NOT get an effectResponse sent
-    -- back -- doing so was sending a bogus "failure" status for every one,
-    -- which likely contributed to the connection getting aborted
-    -- (WSAECONNABORTED/err=10053) shortly after a burst of them.
+    -- CORRECTED 2026-07-20 (was wrongly treated as a plain keepalive ping
+    -- since 2026-07-13): per Crowd Control's own SimpleTCP protocol
+    -- reference, request type 0xFD/253 is GameUpdate -- "Request for
+    -- updated game state information" -- not a no-op ping. This mod only
+    -- ever sent "ready" proactively (see send_game_state) and never once
+    -- replied to any of these specific incoming requests, each of which
+    -- carries its own `id`. If Crowd Control gates effect dispatch (or
+    -- connection liveness) on the game actually answering these, silently
+    -- dropping every one of them would explain both the periodic
+    -- disconnect/reconnect cycling observed this session AND effects never
+    -- reaching the socket at all despite the connector showing "Ready".
+    -- Reply in kind -- a GameUpdate response (same type, 253) echoing this
+    -- request's id -- rather than our own unprompted announcement.
+    if request.type == GAME_UPDATE_TYPE then
+        send_game_state_reply(request.id, "ready")
+        return
+    end
+
+    -- Other non-effect protocol messages (no `code` field) -- e.g. type
+    -- 0x02 EffectStop, which Crowd Control's reference documents but this
+    -- mod doesn't yet implement handling for. Deliberately left unanswered
+    -- rather than guessing at an unconfirmed response shape -- sending the
+    -- WRONG response type previously caused the connection to get aborted
+    -- (WSAECONNABORTED/err=10053), so silence is the safer default until
+    -- each of these is individually confirmed.
     if request.code == nil then
         return
     end
