@@ -130,6 +130,32 @@ local effect_handlers = {
             end
         end,
     },
+
+    -- ####################### --
+    -- # KO / danger           # --
+    -- ####################### --
+    -- One-shot, no revert -- both of these are real, instantaneous state
+    -- changes (a real KO event-script cold-start, or dropping Sora to 1 HP),
+    -- not something to capture-and-restore later. Neither kh1.ko_sora nor
+    -- kh1.heartless_angel_sora returns a value, so `apply` explicitly
+    -- returns true itself -- otherwise handle_request would read the nil
+    -- return as a failed apply and log/report it as such even though the
+    -- call succeeded. Both already no-op via sora_koed() if Sora is already
+    -- KO'd, so no extra guard is needed here.
+
+    ko_sora = {
+        apply = function()
+            kh1.ko_sora()
+            return true
+        end,
+    },
+
+    heartless_angel_sora = {
+        apply = function()
+            kh1.heartless_angel_sora()
+            return true
+        end,
+    },
 }
 
 -- ####################### --
