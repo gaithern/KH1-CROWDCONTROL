@@ -19,6 +19,22 @@
     libraries that never run on their own (that's where kh1_lua_library.lua
     itself lives, and where this mod's own kh1_crowdcontrol_native.dll stays
     -- a require()'d native module doesn't need to be a top-level script).
+
+    INCOMING MESSAGE PARSING (2026-07-20): this mod does NOT decode incoming
+    JSON in Lua. Confirmed live: this modding environment's embedded Lua
+    (LuaBackend) has a real bug where its own string library (string.byte,
+    and anything built on it like string.find/gsub/json.decode) returns
+    nil/garbage for strings longer than ~40 bytes that originated from a
+    native lua_pushlstring call, while the native C API reads the exact same
+    memory correctly. Real effect requests are 300+ bytes, so Lua-side
+    parsing was silently swallowing every one of them -- Crowd Control was
+    sending them correctly the entire time. ccnet.cc_poll_message() does all
+    buffering/NUL-splitting/field-extraction natively in C++ instead, and
+    only ever returns short already-extracted values (a numeric id/type/
+    duration, a short code string), which stay safely under whatever length
+    threshold triggers the bug. json.encode is still used for OUTGOING
+    messages -- those are Lua-created strings, not native-pushed ones, so
+    they aren't affected by this bug regardless of length.
 ]]
 
 -- kh1_lua_library's functions (soraHP, zantHack, fnc_play_se2, etc.) read
@@ -38,7 +54,6 @@ local RECONNECT_INTERVAL_SECONDS = 5
 
 local socket_handle = nil
 local connecting_handle = nil -- non-nil while a non-blocking connect is in flight (see try_connect)
-local recv_buffer = ""
 local next_reconnect_attempt = 0
 
 -- ConsolePrint output isn't visible anywhere by default in this modding
@@ -69,9 +84,9 @@ end
 local DEFAULT_DURATION_SECONDS = 30
 local active_timed_effects = {} -- code -> { revert = fn, deadline = number }
 
-local function effect_duration_seconds(request)
-    if request.duration and request.duration > 0 then
-        return request.duration / 1000 -- Crowd Control sends duration in milliseconds
+local function effect_duration_seconds(duration_ms)
+    if duration_ms and duration_ms > 0 then
+        return duration_ms / 1000 -- Crowd Control sends duration in milliseconds
     end
     return DEFAULT_DURATION_SECONDS
 end
@@ -94,7 +109,7 @@ end
 -- define both directions themselves in kh1_lua_library) -- no state capture
 -- needed, `off` IS the vanilla state.
 local function toggle_effect(on_fn, off_fn)
-    return function(request)
+    return function()
         on_fn()
         return true, off_fn
     end
@@ -106,9 +121,9 @@ end
 
 -- Keyed by the effect "code" Crowd Control sends in each request -- these
 -- must match the effect ids declared in the game pack (see
--- pack/kh1-crowdcontrol-pack.json). Each handler is `{ apply = function(request)
--- -> ok, revert_fn end }`; `revert_fn` is omitted for instant, one-shot
--- effects and required for anything that should auto-expire.
+-- pack/KH1CrowdControlPack.cs). Each handler is `{ apply = function() ->
+-- ok, revert_fn end }`; `revert_fn` is omitted for instant, one-shot effects
+-- and required for anything that should auto-expire.
 local effect_handlers = {
     -- The only play_se2 id confirmed live/audible so far (see
     -- kh1_lua_library.lua's play_se2 comment) -- expand this list only with
@@ -116,7 +131,7 @@ local effect_handlers = {
     -- Kept as its own entry (rather than folded into the SOUND_EFFECTS loop
     -- below) so this specific "confirmed good" status stays visible.
     sound_31 = {
-        apply = function(request)
+        apply = function()
             return kh1.play_se2(31, 0)
         end,
     },
@@ -168,7 +183,7 @@ local effect_handlers = {
     -- calculate_ground_combo_limit/calculate_air_combo_limit).
 
     mega_combos = {
-        apply = function(request)
+        apply = function()
             local original_ground = kh1.get_ground_combo_length_limit()
             local original_air = kh1.get_air_combo_length_limit()
             kh1.set_ground_combo_length_limit(10)
@@ -180,7 +195,7 @@ local effect_handlers = {
         end,
     },
     no_combos = {
-        apply = function(request)
+        apply = function()
             local original_ground = kh1.get_ground_combo_length_limit()
             local original_air = kh1.get_air_combo_length_limit()
             kh1.set_ground_combo_length_limit(1)
@@ -200,14 +215,14 @@ local effect_handlers = {
     -- correctly even if something else already changed animation speed.
 
     slow_motion = {
-        apply = function(request)
+        apply = function()
             local original = kh1.get_animation_speed()
             kh1.set_animation_speed(original * 0.5)
             return true, function() kh1.set_animation_speed(original) end
         end,
     },
     hyper_speed = {
-        apply = function(request)
+        apply = function()
             local original = kh1.get_animation_speed()
             kh1.set_animation_speed(original * 2.0)
             return true, function() kh1.set_animation_speed(original) end
@@ -222,13 +237,13 @@ local effect_handlers = {
     -- regardless of what the current value is.
 
     summon_time_half = {
-        apply = function(request)
+        apply = function()
             kh1.multiply_summon_time(0.5)
             return true, function() kh1.multiply_summon_time(1.0) end
         end,
     },
     summon_time_double = {
-        apply = function(request)
+        apply = function()
             kh1.multiply_summon_time(2.0)
             return true, function() kh1.multiply_summon_time(1.0) end
         end,
@@ -272,7 +287,7 @@ local ABILITY_EFFECTS = {
 }
 for code, ability_name in pairs(ABILITY_EFFECTS) do
     effect_handlers[code] = {
-        apply = function(request)
+        apply = function()
             kh1.enable_ability(ability_name)
             return true
         end,
@@ -314,7 +329,7 @@ local GIVE_ITEM_EFFECTS = {
 }
 for code, item_id in pairs(GIVE_ITEM_EFFECTS) do
     effect_handlers[code] = {
-        apply = function(request)
+        apply = function()
             return kh1.spawn_prize(item_id)
         end,
     }
@@ -329,21 +344,9 @@ end
 -- be free-typed viewer text, but Crowd Control's team confirmed on Discord
 -- (2026-07-13) the SimpleTCP C# pack SDK has NO free-text input at all --
 -- only a numeric Quantity slider and Parameters (pick one option from a
--- list, or a hex color).
---
--- Tried a Parameters-based picker next (confirmed working wire shape:
--- {"code":"message","parameters":{"text":{"value":"gg",...}}}), but
--- live-tested (2026-07-13) Parameters-based effects turned out to have some
--- kind of much longer effective retrigger cooldown (~60s) independent of an
--- explicit low SessionCooldown -- give_ap_up (no Parameters) retriggers
--- instantly and repeatedly, message (Parameters-based) did not. Root cause
--- not confirmed (Crowd Control's SDK/Test-Effects tool, not this repo's
--- code or the game -- ruled out via KH1-LUA-LIBRARY-DEBUG retriggering the
--- same underlying kh1.show_custom_item_popup call instantly). Reworked
--- below as discrete per-message effects instead, matching the
--- give_*/ability_* pattern that's already confirmed to retrigger fine --
--- keys here must match the codes declared in pack/KH1CrowdControlPack.cs
--- exactly.
+-- list, or a hex color). Reworked as discrete per-message effects instead,
+-- matching the give_*/ability_* pattern -- keys here must match the codes
+-- declared in pack/KH1CrowdControlPack.cs exactly.
 local MESSAGE_PRESETS = {
     message_gg = "GG",
     message_nice = "Nice!",
@@ -364,7 +367,7 @@ local MESSAGE_PRESETS = {
 }
 for code, text in pairs(MESSAGE_PRESETS) do
     effect_handlers[code] = {
-        apply = function(request)
+        apply = function()
             return kh1.show_custom_item_popup(text)
         end,
     }
@@ -395,7 +398,7 @@ local SOUND_RANGE_MAX = 76
 for se_id = SOUND_RANGE_MIN, SOUND_RANGE_MAX do
     if se_id ~= 31 then
         effect_handlers["sound_" .. se_id] = {
-            apply = function(request)
+            apply = function()
                 return kh1.play_se2(se_id, 0)
             end,
         }
@@ -421,7 +424,7 @@ local SPELL_NAMES = {
 }
 
 local function spell_effectiveness_effect(multiplier)
-    return function(request)
+    return function()
         local originals = {}
         for _, spell in ipairs(SPELL_NAMES) do
             originals[spell] = kh1.get_spell_effectiveness(spell)
@@ -493,7 +496,6 @@ local function disconnect()
         ccnet.cc_close(connecting_handle)
         connecting_handle = nil
     end
-    recv_buffer = ""
 end
 
 -- ############### --
@@ -503,43 +505,21 @@ end
 local STATUS_SUCCESS = 0
 local STATUS_FAILURE = 1
 
--- GameUpdate message (type 0xFD / 253) -- CONFIRMED (2026-07-13) required:
--- "ready" is the only game state where Crowd Control will actually dispatch
--- effects; without ever sending this, the SDK reported the connector as
--- unable to reach "the game" even though the raw TCP socket was connected
--- and receiving traffic fine (the 253-typed messages we were seeing FROM
--- Crowd Control every few seconds appear to be its own side of this same
--- message family, not just a plain ping -- see the SimpleJSON structure
--- reference's Game State Updates section). Only ever sends "ready" -- this
--- mod doesn't currently track finer-grained states (loading/paused/menu/
--- cutscene/etc.) that a more complete integration might report.
+-- GameUpdate message (type 0xFD / 253): a REQUEST from Crowd Control for
+-- updated game state, not a plain keepalive (corrected 2026-07-20 -- see
+-- header comment). "ready" is the only game state where Crowd Control will
+-- actually dispatch effects.
 local GAME_UPDATE_TYPE = 253
-
--- Observed live 2026-07-20: the connection spontaneously closes and
--- reconnects roughly every 1-2 minutes even while otherwise idle/healthy,
--- and at least one lost effect request was traced to landing within ~2
--- seconds of one of these cycles (request sent right as the old connection
--- was torn down and replaced). Suspected cause: this mod previously sent
--- "ready" exactly once, right after connecting, and never again -- if
--- Crowd Control's connector expects a periodic liveness update rather than
--- a one-time announcement, going quiet after the first one could be exactly
--- what makes it decide the game side is stale and recycle the connection.
--- Resending on a timer is a cheap thing to try before assuming this is
--- unfixable from the mod side.
-local GAME_STATE_RESEND_INTERVAL_SECONDS = 10
-local next_game_state_send = 0
 
 local function send_game_state(state)
     if not socket_handle then return end
     local msg = json.encode({ type = GAME_UPDATE_TYPE, state = state })
     ccnet.cc_send(socket_handle, msg .. "\0")
     log(string.format("Sent game state: %s", state))
-    next_game_state_send = os.clock() + GAME_STATE_RESEND_INTERVAL_SECONDS
 end
 
 -- Reply to a SPECIFIC incoming GameUpdate request (echoes its `id`), as
--- opposed to send_game_state's unprompted announcement -- see handle_request
--- for why this distinction turned out to matter.
+-- opposed to send_game_state's unprompted announcement.
 local function send_game_state_reply(request_id, state)
     if not socket_handle then return end
     local msg = json.encode({ id = request_id, type = GAME_UPDATE_TYPE, state = state })
@@ -552,80 +532,61 @@ local function send_response(request_id, ok)
     ccnet.cc_send(socket_handle, response .. "\0")
 end
 
-local function handle_request(request)
-    -- TEMPORARY DEBUG LOGGING: prints the raw incoming request so the
-    -- actual wire shape of `parameters` (still not fully confirmed against
-    -- a real SimpleTCP session) can be seen directly instead of guessed.
-    -- Remove once request.parameters access throughout effect_handlers is
-    -- confirmed correct.
-    local log_ok, log_encoded = pcall(json.encode, request)
-    log(string.format("Received request: %s", log_ok and log_encoded or "<failed to encode>"))
+-- id/msg_type/code/duration come pre-extracted from ccnet.cc_poll_message --
+-- see header comment for why this mod no longer decodes JSON in Lua at all.
+local function handle_request(id, msg_type, code, duration)
+    log(string.format("Received request: id=%s type=%s code=%s duration=%s",
+        tostring(id), tostring(msg_type), tostring(code), tostring(duration)))
 
-    -- CORRECTED 2026-07-20 (was wrongly treated as a plain keepalive ping
-    -- since 2026-07-13): per Crowd Control's own SimpleTCP protocol
-    -- reference, request type 0xFD/253 is GameUpdate -- "Request for
-    -- updated game state information" -- not a no-op ping. This mod only
-    -- ever sent "ready" proactively (see send_game_state) and never once
-    -- replied to any of these specific incoming requests, each of which
-    -- carries its own `id`. If Crowd Control gates effect dispatch (or
-    -- connection liveness) on the game actually answering these, silently
-    -- dropping every one of them would explain both the periodic
-    -- disconnect/reconnect cycling observed this session AND effects never
-    -- reaching the socket at all despite the connector showing "Ready".
-    -- Reply in kind -- a GameUpdate response (same type, 253) echoing this
-    -- request's id -- rather than our own unprompted announcement.
-    if request.type == GAME_UPDATE_TYPE then
-        send_game_state_reply(request.id, "ready")
+    if msg_type == GAME_UPDATE_TYPE then
+        send_game_state_reply(id, "ready")
         return
     end
 
     -- Other non-effect protocol messages (no `code` field) -- e.g. type
     -- 0x02 EffectStop, which Crowd Control's reference documents but this
     -- mod doesn't yet implement handling for. Deliberately left unanswered
-    -- rather than guessing at an unconfirmed response shape -- sending the
-    -- WRONG response type previously caused the connection to get aborted
-    -- (WSAECONNABORTED/err=10053), so silence is the safer default until
-    -- each of these is individually confirmed.
-    if request.code == nil then
+    -- rather than guessing at an unconfirmed response shape.
+    if code == nil then
         return
     end
 
-    local handler = effect_handlers[request.code]
+    local handler = effect_handlers[code]
     local ok = false
 
     if not handler or not handler.apply then
-        log(string.format("No handler for code '%s'", tostring(request.code)))
+        log(string.format("No handler for code '%s'", tostring(code)))
     else
-        local existing = active_timed_effects[request.code]
+        local existing = active_timed_effects[code]
         if existing then
             -- Already active: extend the timer instead of re-applying (see
             -- active_timed_effects' comment for why re-applying would be
             -- wrong here).
-            existing.deadline = os.clock() + effect_duration_seconds(request)
+            existing.deadline = os.clock() + effect_duration_seconds(duration)
             ok = true
         else
-            local call_ok, apply_ok, revert = pcall(handler.apply, request)
+            local call_ok, apply_ok, revert = pcall(handler.apply)
             if not call_ok then
                 -- apply_ok holds the error message here, not a boolean --
                 -- pcall's second return on failure is the error, not
                 -- apply_ok's normal meaning.
-                log(string.format("Effect '%s' errored: %s", tostring(request.code), tostring(apply_ok)))
+                log(string.format("Effect '%s' errored: %s", tostring(code), tostring(apply_ok)))
             elseif not apply_ok then
-                log(string.format("Effect '%s' handler returned false (bad input?)", tostring(request.code)))
+                log(string.format("Effect '%s' handler returned false (bad input?)", tostring(code)))
             else
-                log(string.format("Effect '%s' handler returned true (apply call succeeded)", tostring(request.code)))
+                log(string.format("Effect '%s' handler returned true (apply call succeeded)", tostring(code)))
             end
             ok = call_ok and apply_ok and true or false
             if ok and revert then
-                active_timed_effects[request.code] = {
+                active_timed_effects[code] = {
                     revert = revert,
-                    deadline = os.clock() + effect_duration_seconds(request),
+                    deadline = os.clock() + effect_duration_seconds(duration),
                 }
             end
         end
     end
 
-    send_response(request.id, ok)
+    send_response(id, ok)
 end
 
 -- ############### --
@@ -635,10 +596,10 @@ end
 function update_crowdcontrol()
     --[[Drives the whole connection: reconnects to the Crowd Control app on a
     timer while disconnected, reverts any timed effects whose deadline has
-    passed, and otherwise drains any complete NUL-terminated JSON messages
-    off the socket and dispatches each to effect_handlers. Call this every
-    frame from _OnFrame -- mirrors kh1_lua_library's update_text_boxes()
-    pattern.]]
+    passed, and otherwise drains any complete messages off the socket (via
+    ccnet.cc_poll_message, which parses natively -- see header comment) and
+    dispatches each to effect_handlers. Call this every frame from _OnFrame
+    -- mirrors kh1_lua_library's update_text_boxes() pattern.]]
     update_timed_effects()
 
     if connecting_handle then
@@ -646,7 +607,6 @@ function update_crowdcontrol()
         if status == "connected" then
             socket_handle = connecting_handle
             connecting_handle = nil
-            recv_buffer = ""
             log(string.format("Connected to %s:%d", CC_HOST, CC_PORT))
             send_game_state("ready")
         elseif status == "failed" then
@@ -667,31 +627,19 @@ function update_crowdcontrol()
         return
     end
 
-    if os.clock() >= next_game_state_send then
-        send_game_state("ready")
-    end
-
-    local data, err = ccnet.cc_recv(socket_handle)
-    if data == nil then
-        log(string.format("Connection lost (%s), will retry", tostring(err)))
-        disconnect()
-        return
-    end
-
-    if data ~= "" then
-        recv_buffer = recv_buffer .. data
-    end
-
+    -- Drain every complete message buffered this frame -- one recv() can
+    -- contain several back-to-back messages.
     while true do
-        local nul_pos = string.find(recv_buffer, "\0", 1, true)
-        if not nul_pos then break end
-        local message = string.sub(recv_buffer, 1, nul_pos - 1)
-        recv_buffer = string.sub(recv_buffer, nul_pos + 1)
-        if message ~= "" then
-            local decode_ok, request = pcall(json.decode, message)
-            if decode_ok and type(request) == "table" then
-                handle_request(request)
-            end
+        local status, a, b, c, d = ccnet.cc_poll_message(socket_handle)
+        if status == "message" then
+            local id, msg_type, code, duration = a, b, c, d
+            handle_request(id, msg_type, code, duration)
+        elseif status == "closed" then
+            log(string.format("Connection lost (%s), will retry", tostring(a)))
+            disconnect()
+            break
+        else -- "none"
+            break
         end
     end
 end

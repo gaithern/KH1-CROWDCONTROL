@@ -4,6 +4,7 @@
 #include <cstring>
 #include <cstdint>
 #include <string>
+#include <map>
 
 #pragma comment(lib, "ws2_32.lib")
 
@@ -264,9 +265,127 @@ extern "C" int l_cc_recv(void* L) {
     return 2;
 }
 
+// --- MESSAGE BUFFERING & FIELD EXTRACTION ---
+// Confirmed live 2026-07-20: this modding environment's embedded Lua
+// (LuaBackend) has a real bug where its OWN string library (string.byte,
+// and by extension anything built on it like gsub/find/json.decode) returns
+// nil/garbage for strings longer than ~40 bytes that originated from a
+// native lua_pushlstring call -- while the native C API (lua_tolstring)
+// reads the exact same memory correctly. Real effect requests are 300+
+// bytes and were being silently swallowed by Lua-side parsing this entire
+// time; Crowd Control was sending them correctly all along. Short strings
+// (under the threshold) are unaffected, which is why GameUpdate pings
+// (~40 bytes) always worked. Workaround: do ALL buffering/NUL-splitting/
+// field extraction here in C++, and only ever push short, already-extracted
+// values (a numeric id/type/duration, a short code string) into Lua --
+// never the raw long message itself.
+static std::map<SOCKET, std::string> g_recvBuffers;
+
+// Loops past occurrences whose value isn't actually numeric instead of
+// giving up on the first match -- confirmed live 2026-07-20: real effect
+// requests contain a NESTED "sourceDetails":{"type":"crowd-control-test"}
+// ahead of the real top-level "type":1, and a single-match version of this
+// found that nested string value first, saw a quote instead of a digit, and
+// gave up entirely (silently returning "type" as absent). Harmless for
+// dispatch itself (the `code` field, not `type`, gates effect handling),
+// but would matter for anything that starts relying on `type` -- e.g.
+// telling EffectStop (0x02) apart from EffectStart (0x01).
+static bool ExtractIntField(const std::string& msg, const char* key, long long& outValue) {
+    std::string needle = std::string("\"") + key + "\":";
+    size_t searchFrom = 0;
+    while (true) {
+        size_t pos = msg.find(needle, searchFrom);
+        if (pos == std::string::npos) return false;
+        size_t valueStart = pos + needle.size();
+        bool neg = false;
+        size_t p = valueStart;
+        if (p < msg.size() && msg[p] == '-') { neg = true; p++; }
+        size_t digitsStart = p;
+        while (p < msg.size() && msg[p] >= '0' && msg[p] <= '9') p++;
+        if (p > digitsStart) {
+            outValue = std::stoll(msg.substr(digitsStart, p - digitsStart));
+            if (neg) outValue = -outValue;
+            return true;
+        }
+        searchFrom = pos + needle.size();
+    }
+}
+
+static bool ExtractStringField(const std::string& msg, const char* key, std::string& outValue) {
+    std::string needle = std::string("\"") + key + "\":\"";
+    size_t pos = msg.find(needle);
+    if (pos == std::string::npos) return false;
+    pos += needle.size();
+    size_t end = msg.find('"', pos);
+    if (end == std::string::npos) return false;
+    outValue = msg.substr(pos, end - pos);
+    return true;
+}
+
+// cc_poll_message(handle) -> drains one recv() and, if a complete
+// NUL-terminated message is buffered, extracts and returns its fields.
+// Call in a loop each frame until status is "none" or "closed" -- one
+// recv() can contain multiple back-to-back messages.
+//   "message", id(int|nil), type(int|nil), code(string|nil), duration(int|nil)
+//   "none"                                    -- nothing complete yet, socket fine
+//   "closed", error(string)                   -- connection lost
+extern "C" int l_cc_poll_message(void* L) {
+    SOCKET s = (SOCKET)p_lua_tointegerx(L, 1, nullptr);
+
+    char buf[RECV_BUFFER_SIZE];
+    int received = recv(s, buf, sizeof(buf), 0);
+    if (received > 0) {
+        g_recvBuffers[s].append(buf, (size_t)received);
+    } else if (received == 0) {
+        LogDebug("cc_poll_message: peer closed connection");
+        g_recvBuffers.erase(s);
+        p_lua_pushstring(L, "closed");
+        p_lua_pushstring(L, "peer closed connection");
+        return 2;
+    } else {
+        int err = WSAGetLastError();
+        if (err != WSAEWOULDBLOCK) {
+            char msg[64];
+            snprintf(msg, sizeof(msg), "cc_poll_message: recv() failed, err=%d", err);
+            LogDebug(msg);
+            g_recvBuffers.erase(s);
+            p_lua_pushstring(L, "closed");
+            p_lua_pushstring(L, "recv() failed");
+            return 2;
+        }
+        // WSAEWOULDBLOCK: no new bytes this call -- fall through anyway,
+        // a previous call may have already buffered a complete message.
+    }
+
+    std::string& buffer = g_recvBuffers[s];
+    size_t nulPos = buffer.find('\0');
+    if (nulPos == std::string::npos) {
+        p_lua_pushstring(L, "none");
+        return 1;
+    }
+
+    std::string message = buffer.substr(0, nulPos);
+    buffer.erase(0, nulPos + 1);
+
+    long long id = 0, msgType = 0, duration = 0;
+    bool hasId = ExtractIntField(message, "id", id);
+    bool hasType = ExtractIntField(message, "type", msgType);
+    bool hasDuration = ExtractIntField(message, "duration", duration);
+    std::string code;
+    bool hasCode = ExtractStringField(message, "code", code);
+
+    p_lua_pushstring(L, "message");
+    if (hasId) p_lua_pushinteger(L, id); else p_lua_pushnil(L);
+    if (hasType) p_lua_pushinteger(L, msgType); else p_lua_pushnil(L);
+    if (hasCode) p_lua_pushlstring(L, code.c_str(), code.size()); else p_lua_pushnil(L);
+    if (hasDuration) p_lua_pushinteger(L, duration); else p_lua_pushnil(L);
+    return 5;
+}
+
 // cc_close(handle) -> (none)
 extern "C" int l_cc_close(void* L) {
     SOCKET s = (SOCKET)p_lua_tointegerx(L, 1, nullptr);
+    g_recvBuffers.erase(s);
     closesocket(s);
     return 0;
 }
@@ -292,6 +411,7 @@ static const luaL_Reg kh1_crowdcontrol_native_lib[] = {
     {"cc_connect_status", reinterpret_cast<void*>(l_cc_connect_status)},
     {"cc_send", reinterpret_cast<void*>(l_cc_send)},
     {"cc_recv", reinterpret_cast<void*>(l_cc_recv)},
+    {"cc_poll_message", reinterpret_cast<void*>(l_cc_poll_message)},
     {"cc_close", reinterpret_cast<void*>(l_cc_close)},
     {"cc_log", reinterpret_cast<void*>(l_cc_log)},
     {nullptr, nullptr}
@@ -350,7 +470,7 @@ extern "C" __declspec(dllexport) int luaopen_kh1_crowdcontrol_native(void* L) {
         return 0;
     }
 
-    p_lua_createtable(L, 0, 6);
+    p_lua_createtable(L, 0, 7);
     p_luaL_setfuncs(L, kh1_crowdcontrol_native_lib, 0);
     return 1;
 }
