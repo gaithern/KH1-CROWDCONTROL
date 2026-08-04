@@ -1,6 +1,6 @@
 # KH1 Crowd Control
 
-Lets Twitch [Crowd Control](https://crowdcontrol.live/) redemptions trigger real effects in Kingdom Hearts Final Mix (PC): spawn an item near Sora, pop a custom message on screen, and drop Sora's combo limit to 1.
+Lets Twitch [Crowd Control](https://crowdcontrol.live/) redemptions trigger real effects in Kingdom Hearts Final Mix (PC): spawn an item or Heartless enemy near Sora, pop a custom message on screen, drop Sora's combo limit to 1, or trigger a KO/Heartless Angel.
 
 This mod is a thin connector: it opens a TCP connection to the Crowd Control app and dispatches whatever effects it receives into KH1-LUA-LIBRARY functions. It does not work standalone — **KH1-LUA-LIBRARY must be installed alongside it**.
 
@@ -51,7 +51,7 @@ local CC_PORT = 43384
 
 ## 4. Effects currently wired up
 
-See the `effect_handlers` table in `scripts/kh1_crowdcontrol.lua` (32 effects total) and the matching entries in `pack/KH1CrowdControlPack.cs`.
+See the `effect_handlers` table in `scripts/kh1_crowdcontrol.lua` (72 effects total) and the matching entries in `pack/KH1CrowdControlPack.cs`.
 
 **Timed effects** auto-revert: Crowd Control sends a `duration` (ms) with the request; the mod tracks a deadline per effect *code* (keyed by code, not per-redemption — see the `active_timed_effects` comment in the script for why) and reverts automatically via `_OnFrame`, falling back to 30s if no duration is given. A second redemption of an already-active effect just extends its timer rather than re-applying.
 
@@ -62,6 +62,7 @@ See the `effect_handlers` table in `scripts/kh1_crowdcontrol.lua` (32 effects to
 | `no_combos` | Sets ground+air combo limit to 1 for 30s, restores the real captured original after | Untested end-to-end |
 | `ko_sora` | Instantly triggers Sora's real in-game KO sequence via `kh1.ko_sora()` (cold-starts the real KO event script -- death animation, input lock, Game Over) | Untested end-to-end -- `kh1.ko_sora` itself is live-verified per its own doc comment in KH1-LUA-LIBRARY |
 | `heartless_angel_sora` | Drops Sora to 1 HP via `kh1.heartless_angel_sora()`, same as Sephiroth's Heartless Angel move | Untested end-to-end |
+| `spawn_shadow`, `spawn_soldier`, `spawn_powerwild`, `spawn_sea_neon`, `spawn_red_nocturne`, `spawn_blue_rhapsody`, `spawn_yellow_opera`, `spawn_green_requiem`, `spawn_air_soldier`, `spawn_bouncywild`, `spawn_large_body`, `spawn_fat_bandit`, `spawn_sheltering_zone`, `spawn_bandit`, `spawn_pirate`, `spawn_wight_knight`, `spawn_air_pirate`, `spawn_gargoyle`, `spawn_search_ghost`, `spawn_aquatank`, `spawn_screwdiver`, `spawn_darkball`, `spawn_bitsniper`, `spawn_wizard`, `spawn_invisible`, `spawn_wyvern`, `spawn_angel_star`, `spawn_defender`, `spawn_jet_balloon`, `spawn_stealth_sneak`, `spawn_missile_diver`, `spawn_sniperwild`, `spawn_pink_agaricus`, `spawn_black_fungi`, `spawn_shadow_ht`, `spawn_search_ghost_ht`, `spawn_gargoyle_ht`, `spawn_wight_knight_ht`, `spawn_wizard_ht`, `spawn_darkball_ht` (40 effects) | Spawns a real Heartless near Sora via `kh1.spawn_enemy(model_path, motion_path, ...)` (queued, non-blocking — driven every frame by `kh1.update_spawn_enemy()`), with `motion_path` looked up per-model from KH1-LUA-LIBRARY's `kh1_creature_data.lua` rather than derived from the model filename (some Halloween Town reskins reuse a different base creature's `.mset`) | Untested end-to-end — covers 40 of the 50 enemies present in `kh1_creature_data.lua`'s offline-extracted table; deliberately excludes Battleship, Neoshadow, White Mushroom, Halloween Town White Mushroom, Black Ballade, Halloween Town White Mushroom 2, Halloween Town Search Ghost 2, Halloween Town Rare Truffles, and Grand Ghost (none of which are in that table, so `spawn_enemy`'s charId/weight/template would default to 0/0/nil for them unless the player already visited that creature's native room live this session), plus the non-Halloween-Town Rare Truffles (present in the table, but left out by request) |
 
 `spawn_prize`'s own doc comment separately warns against chaining the game's claim/display sequence (`fnc_update_widget_queue`, EVDL 0x170/0x16F) after it — that pair's second argument is actually a pop-in-animation duration, not an item id, and feeding it one there corrupts the pickup icon's scale animation; `spawn_prize` deliberately never calls that pair, so this doesn't affect the `give_*` effects above, but don't add code that does call it with an item_id.
 

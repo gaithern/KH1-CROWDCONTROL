@@ -254,14 +254,16 @@ end
 -- xa_ex_2021.mset) -- confirmed against kh1_creature_data.lua's own table,
 -- the same source spawn_enemy's charId/weight/template come from.
 --
--- Deliberately excludes 9 of the 50 enemies from the original mapping --
--- Battleship, Neoshadow, White Mushroom, White Mushroom (Halloween Town),
--- Black Ballade, White Mushroom 2 (Halloween Town), Search Ghost 2
--- (Halloween Town), Rare Truffles (Halloween Town), Grand Ghost -- none of
--- these are present in kh1_creature_data.lua's offline-extracted table, so
--- spawn_enemy's charId/weight/template would default to 0/0/nil for them
--- unless the player already visited that creature's native room live this
--- session -- untested and likely spawns wrong/broken.
+-- Deliberately excludes 10 of the 50 enemies from the original mapping.
+-- 9 of those -- Battleship, Neoshadow, White Mushroom, White Mushroom
+-- (Halloween Town), Black Ballade, White Mushroom 2 (Halloween Town),
+-- Search Ghost 2 (Halloween Town), Rare Truffles (Halloween Town), Grand
+-- Ghost -- aren't present in kh1_creature_data.lua's offline-extracted
+-- table, so spawn_enemy's charId/weight/template would default to 0/0/nil
+-- for them unless the player already visited that creature's native room
+-- live this session -- untested and likely spawns wrong/broken. The 10th,
+-- Rare Truffles (non-Halloween-Town), IS present in that table but left out
+-- by request.
 local ENEMY_SPAWN_EFFECTS = {
     spawn_shadow = "xa_ex_2020.mdls",
     spawn_soldier = "xa_ex_2010.mdls",
@@ -297,7 +299,6 @@ local ENEMY_SPAWN_EFFECTS = {
     spawn_sniperwild = "xa_ex_2450.mdls",
     spawn_pink_agaricus = "xa_ex_2410.mdls",
     spawn_black_fungi = "xa_ex_2380.mdls",
-    spawn_rare_truffles = "xa_ex_2390.mdls",
     spawn_shadow_ht = "xa_ex_2021.mdls",
     spawn_search_ghost_ht = "xa_ex_2231.mdls",
     spawn_gargoyle_ht = "xa_ex_2221.mdls",
