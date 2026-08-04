@@ -45,6 +45,7 @@
 require("VersionCheck")
 
 local kh1 = require("kh1_lua_library")
+local kh1_creature_data = require("kh1_creature_data")
 local json = require("json")
 local ccnet = require("kh1_crowdcontrol_native")
 
@@ -212,6 +213,86 @@ for code, text in pairs(MESSAGE_PRESETS) do
 end
 
 -- ####################### --
+-- # Enemy spawns          # --
+-- ####################### --
+-- One-shot: spawns a real Heartless near Sora via kh1.spawn_enemy (queued,
+-- non-blocking -- driven every frame by kh1.update_spawn_enemy() in
+-- update_crowdcontrol below, same pattern as update_timed_effects). No
+-- revert -- this is a real instantaneous state change, not something to
+-- capture-and-restore.
+--
+-- motion_path is looked up from kh1_creature_data at call time rather than
+-- derived from model_path -- some reskins (Halloween Town variants) reuse a
+-- DIFFERENT base creature's .mset than their own filename would suggest
+-- (e.g. xa_ex_2021.mdls's real motion set is xa_ex_2020.mset, not
+-- xa_ex_2021.mset) -- confirmed against kh1_creature_data.lua's own table,
+-- the same source spawn_enemy's charId/weight/template come from.
+--
+-- Deliberately excludes 9 of the 50 enemies from the original mapping --
+-- Battleship, Neoshadow, White Mushroom, White Mushroom (Halloween Town),
+-- Black Ballade, White Mushroom 2 (Halloween Town), Search Ghost 2
+-- (Halloween Town), Rare Truffles (Halloween Town), Grand Ghost -- none of
+-- these are present in kh1_creature_data.lua's offline-extracted table, so
+-- spawn_enemy's charId/weight/template would default to 0/0/nil for them
+-- unless the player already visited that creature's native room live this
+-- session -- untested and likely spawns wrong/broken.
+local ENEMY_SPAWN_EFFECTS = {
+    spawn_shadow = "xa_ex_2020.mdls",
+    spawn_soldier = "xa_ex_2010.mdls",
+    spawn_powerwild = "xa_ex_2030.mdls",
+    spawn_sea_neon = "xa_ex_2070.mdls",
+    spawn_red_nocturne = "xa_ex_2110.mdls",
+    spawn_blue_rhapsody = "xa_ex_2120.mdls",
+    spawn_yellow_opera = "xa_ex_2130.mdls",
+    spawn_green_requiem = "xa_ex_2140.mdls",
+    spawn_air_soldier = "xa_ex_2160.mdls",
+    spawn_bouncywild = "xa_ex_2040.mdls",
+    spawn_large_body = "xa_ex_2050.mdls",
+    spawn_fat_bandit = "xa_ex_2060.mdls",
+    spawn_sheltering_zone = "xa_ex_2080.mdls",
+    spawn_bandit = "xa_ex_2090.mdls",
+    spawn_pirate = "xa_ex_2100.mdls",
+    spawn_wight_knight = "xa_ex_2200.mdls",
+    spawn_air_pirate = "xa_ex_2210.mdls",
+    spawn_gargoyle = "xa_ex_2220.mdls",
+    spawn_search_ghost = "xa_ex_2230.mdls",
+    spawn_aquatank = "xa_ex_2240.mdls",
+    spawn_screwdiver = "xa_ex_2250.mdls",
+    spawn_darkball = "xa_ex_2280.mdls",
+    spawn_bitsniper = "xa_ew_2010.mdls",
+    spawn_wizard = "xa_ex_2150.mdls",
+    spawn_invisible = "xa_ex_2290.mdls",
+    spawn_wyvern = "xa_ex_2320.mdls",
+    spawn_angel_star = "xa_ex_2330.mdls",
+    spawn_defender = "xa_ex_2340.mdls",
+    spawn_jet_balloon = "xa_ex_2480.mdls",
+    spawn_stealth_sneak = "xa_ex_2430.mdls",
+    spawn_missile_diver = "xa_ex_2490.mdls",
+    spawn_sniperwild = "xa_ex_2450.mdls",
+    spawn_pink_agaricus = "xa_ex_2410.mdls",
+    spawn_black_fungi = "xa_ex_2380.mdls",
+    spawn_rare_truffles = "xa_ex_2390.mdls",
+    spawn_shadow_ht = "xa_ex_2021.mdls",
+    spawn_search_ghost_ht = "xa_ex_2231.mdls",
+    spawn_gargoyle_ht = "xa_ex_2221.mdls",
+    spawn_wight_knight_ht = "xa_ex_2201.mdls",
+    spawn_wizard_ht = "xa_ex_2151.mdls",
+    spawn_darkball_ht = "xa_ex_2281.mdls",
+}
+for code, model_path in pairs(ENEMY_SPAWN_EFFECTS) do
+    local known = kh1_creature_data[model_path]
+    local motion_path = known and known.motionPath
+    effect_handlers[code] = {
+        apply = function()
+            kh1.spawn_enemy(model_path, motion_path, nil, nil, nil, function(ok, result)
+                log(string.format("spawn_enemy(\"%s\") = %s / %s", model_path, tostring(ok), tostring(result)))
+            end)
+            return true
+        end,
+    }
+end
+
+-- ####################### --
 -- # Deliberately NOT wired # --
 -- ####################### --
 -- grant_sora_ability / grant_shared_ability / enable_ability: take raw
@@ -366,6 +447,10 @@ function update_crowdcontrol()
     dispatches each to effect_handlers. Call this every frame from _OnFrame
     -- mirrors kh1_lua_library's update_text_boxes() pattern.]]
     update_timed_effects()
+
+    -- Drives any pending spawn_enemy request queued by an enemy-spawn
+    -- effect above -- harmless/no-op if nothing is pending.
+    kh1.update_spawn_enemy()
 
     if connecting_handle then
         local status = ccnet.cc_connect_status(connecting_handle)

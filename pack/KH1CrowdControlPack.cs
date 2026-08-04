@@ -23,6 +23,7 @@ namespace CrowdControl.Games.Packs.KH1FM
         private const string ItemFolder = "Items";
         private const string MessageFolder = "Message";
         private const string ComboFolder = "Combos";
+        private const string EnemyFolder = "Enemies";
 
         public override EffectList Effects => new List<Effect>
         {
@@ -59,6 +60,48 @@ namespace CrowdControl.Games.Packs.KH1FM
 
             new Effect("No Combos", "no_combos")
                 {Category = ComboFolder, Price = 100, Duration = 30, Description = "Temporarily drops Sora's ground and air combo limits to 1 (no combo strings)."},
+
+            new Effect("Spawn Shadow", "spawn_shadow") {Category = EnemyFolder, Price = 100, Description = "Spawns a Shadow near Sora."},
+            new Effect("Spawn Soldier", "spawn_soldier") {Category = EnemyFolder, Price = 100, Description = "Spawns a Soldier near Sora."},
+            new Effect("Spawn Powerwild", "spawn_powerwild") {Category = EnemyFolder, Price = 100, Description = "Spawns a Powerwild near Sora."},
+            new Effect("Spawn Sea Neon", "spawn_sea_neon") {Category = EnemyFolder, Price = 100, Description = "Spawns a Sea Neon near Sora."},
+            new Effect("Spawn Red Nocturne", "spawn_red_nocturne") {Category = EnemyFolder, Price = 100, Description = "Spawns a Red Nocturne near Sora."},
+            new Effect("Spawn Blue Rhapsody", "spawn_blue_rhapsody") {Category = EnemyFolder, Price = 100, Description = "Spawns a Blue Rhapsody near Sora."},
+            new Effect("Spawn Yellow Opera", "spawn_yellow_opera") {Category = EnemyFolder, Price = 100, Description = "Spawns a Yellow Opera near Sora."},
+            new Effect("Spawn Green Requiem", "spawn_green_requiem") {Category = EnemyFolder, Price = 100, Description = "Spawns a Green Requiem near Sora."},
+            new Effect("Spawn Air Soldier", "spawn_air_soldier") {Category = EnemyFolder, Price = 100, Description = "Spawns an Air Soldier near Sora."},
+            new Effect("Spawn Bouncywild", "spawn_bouncywild") {Category = EnemyFolder, Price = 100, Description = "Spawns a Bouncywild near Sora."},
+            new Effect("Spawn Large Body", "spawn_large_body") {Category = EnemyFolder, Price = 100, Description = "Spawns a Large Body near Sora."},
+            new Effect("Spawn Fat Bandit", "spawn_fat_bandit") {Category = EnemyFolder, Price = 100, Description = "Spawns a Fat Bandit near Sora."},
+            new Effect("Spawn Sheltering Zone", "spawn_sheltering_zone") {Category = EnemyFolder, Price = 100, Description = "Spawns a Sheltering Zone near Sora."},
+            new Effect("Spawn Bandit", "spawn_bandit") {Category = EnemyFolder, Price = 100, Description = "Spawns a Bandit near Sora."},
+            new Effect("Spawn Pirate", "spawn_pirate") {Category = EnemyFolder, Price = 100, Description = "Spawns a Pirate near Sora."},
+            new Effect("Spawn Wight Knight", "spawn_wight_knight") {Category = EnemyFolder, Price = 100, Description = "Spawns a Wight Knight near Sora."},
+            new Effect("Spawn Air Pirate", "spawn_air_pirate") {Category = EnemyFolder, Price = 100, Description = "Spawns an Air Pirate near Sora."},
+            new Effect("Spawn Gargoyle", "spawn_gargoyle") {Category = EnemyFolder, Price = 100, Description = "Spawns a Gargoyle near Sora."},
+            new Effect("Spawn Search Ghost", "spawn_search_ghost") {Category = EnemyFolder, Price = 100, Description = "Spawns a Search Ghost near Sora."},
+            new Effect("Spawn Aquatank", "spawn_aquatank") {Category = EnemyFolder, Price = 100, Description = "Spawns an Aquatank near Sora."},
+            new Effect("Spawn Screwdiver", "spawn_screwdiver") {Category = EnemyFolder, Price = 100, Description = "Spawns a Screwdiver near Sora."},
+            new Effect("Spawn Darkball", "spawn_darkball") {Category = EnemyFolder, Price = 100, Description = "Spawns a Darkball near Sora."},
+            new Effect("Spawn Bitsniper", "spawn_bitsniper") {Category = EnemyFolder, Price = 100, Description = "Spawns a Bitsniper near Sora."},
+            new Effect("Spawn Wizard", "spawn_wizard") {Category = EnemyFolder, Price = 100, Description = "Spawns a Wizard near Sora."},
+            new Effect("Spawn Invisible", "spawn_invisible") {Category = EnemyFolder, Price = 100, Description = "Spawns an Invisible near Sora."},
+            new Effect("Spawn Wyvern", "spawn_wyvern") {Category = EnemyFolder, Price = 100, Description = "Spawns a Wyvern near Sora."},
+            new Effect("Spawn Angel Star", "spawn_angel_star") {Category = EnemyFolder, Price = 100, Description = "Spawns an Angel Star near Sora."},
+            new Effect("Spawn Defender", "spawn_defender") {Category = EnemyFolder, Price = 100, Description = "Spawns a Defender near Sora."},
+            new Effect("Spawn Jet Balloon", "spawn_jet_balloon") {Category = EnemyFolder, Price = 100, Description = "Spawns a Jet Balloon near Sora."},
+            new Effect("Spawn Stealth Sneak", "spawn_stealth_sneak") {Category = EnemyFolder, Price = 100, Description = "Spawns a Stealth Sneak near Sora."},
+            new Effect("Spawn Missile Diver", "spawn_missile_diver") {Category = EnemyFolder, Price = 100, Description = "Spawns a Missile Diver near Sora."},
+            new Effect("Spawn Sniperwild", "spawn_sniperwild") {Category = EnemyFolder, Price = 100, Description = "Spawns a Sniperwild near Sora."},
+            new Effect("Spawn Pink Agaricus", "spawn_pink_agaricus") {Category = EnemyFolder, Price = 100, Description = "Spawns a Pink Agaricus near Sora."},
+            new Effect("Spawn Black Fungi", "spawn_black_fungi") {Category = EnemyFolder, Price = 100, Description = "Spawns a Black Fungi near Sora."},
+            new Effect("Spawn Rare Truffles", "spawn_rare_truffles") {Category = EnemyFolder, Price = 100, Description = "Spawns a Rare Truffles near Sora."},
+            new Effect("Spawn Shadow (Halloween Town)", "spawn_shadow_ht") {Category = EnemyFolder, Price = 100, Description = "Spawns a Halloween Town Shadow near Sora."},
+            new Effect("Spawn Search Ghost (Halloween Town)", "spawn_search_ghost_ht") {Category = EnemyFolder, Price = 100, Description = "Spawns a Halloween Town Search Ghost near Sora."},
+            new Effect("Spawn Gargoyle (Halloween Town)", "spawn_gargoyle_ht") {Category = EnemyFolder, Price = 100, Description = "Spawns a Halloween Town Gargoyle near Sora."},
+            new Effect("Spawn Wight Knight (Halloween Town)", "spawn_wight_knight_ht") {Category = EnemyFolder, Price = 100, Description = "Spawns a Halloween Town Wight Knight near Sora."},
+            new Effect("Spawn Wizard (Halloween Town)", "spawn_wizard_ht") {Category = EnemyFolder, Price = 100, Description = "Spawns a Halloween Town Wizard near Sora."},
+            new Effect("Spawn Darkball (Halloween Town)", "spawn_darkball_ht") {Category = EnemyFolder, Price = 100, Description = "Spawns a Halloween Town Darkball near Sora."},
         };
     }
 }
