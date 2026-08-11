@@ -66,6 +66,22 @@ local function log(msg)
     ccnet.cc_log("[Crowd Control] " .. msg)
 end
 
+-- Forward declaration. The enemy-spawn handlers below have to answer their
+-- Crowd Control request from an async callback that fires several frames
+-- later, but send_response itself belongs further down with the rest of the
+-- connection code (it needs socket_handle, which doesn't exist yet up here).
+-- Declaring the local now lets both halves close over the same upvalue --
+-- without this the handlers would capture a nil global instead.
+local send_response
+
+-- Sentinel an effect's `apply` can return INSTEAD of a boolean, meaning "the
+-- real Success/Failure response for this request will be sent later, by me".
+-- handle_request then skips its own send_response so the same request id
+-- isn't answered twice. Used by the enemy-spawn effects, whose true outcome
+-- isn't known for several frames (kh1.spawn_enemy only queues the request --
+-- the asset load behind it can still fail or time out afterwards).
+local PENDING_RESPONSE = {}
+
 -- ####################### --
 -- # Timed-effect tracking # --
 -- ####################### --
@@ -107,9 +123,16 @@ end
 
 -- Keyed by the effect "code" Crowd Control sends in each request -- these
 -- must match the effect ids declared in the game pack (see
--- pack/KH1CrowdControlPack.cs). Each handler is `{ apply = function() ->
--- ok, revert_fn end }`; `revert_fn` is omitted for instant, one-shot effects
--- and required for anything that should auto-expire.
+-- pack/KH1CrowdControlPack.cs). Each handler is
+-- `{ apply = function(request_id, duration) -> ok, revert_fn end }`;
+-- `revert_fn` is omitted for instant, one-shot effects and required for
+-- anything that should auto-expire. Both arguments are optional to accept --
+-- most handlers here declare no parameters at all and simply ignore them.
+--
+-- `apply` may instead return PENDING_RESPONSE to mean "I'll report my own
+-- Success/Failure later" -- that's what request_id is for, and what the
+-- enemy-spawn effects use, since their result isn't known until an asset
+-- load resolves some frames after the request arrives.
 local effect_handlers = {
     -- ####################### --
     -- # Combo limit           # --
@@ -310,11 +333,49 @@ for code, model_path in pairs(ENEMY_SPAWN_EFFECTS) do
     local known = kh1_creature_data[model_path]
     local motion_path = known and known.motionPath
     effect_handlers[code] = {
-        apply = function()
-            kh1.spawn_enemy(model_path, motion_path, nil, nil, nil, function(ok, result)
-                log(string.format("spawn_enemy(\"%s\") = %s / %s", model_path, tostring(ok), tostring(result)))
+        -- Takes the request id (handle_request passes it to every apply) so
+        -- the async callback below can answer THIS specific redemption --
+        -- see PENDING_RESPONSE for why the reply can't be sent inline.
+        apply = function(request_id)
+            -- kh1.spawn_enemy defaults to Sora's exact position when x/y/z
+            -- are nil -- two redemptions close together then land
+            -- coincident, zero distance apart. Confirmed 2026-08-04 as a
+            -- likely trigger for a hard crash when a second creature spawns
+            -- while another is already alive (see
+            -- project_spawn_enemy_cold_spawn_crash_containment.md). Radius
+            -- is a first guess, not yet tuned against real room scale.
+            local pos = kh1.get_sora_pos()
+            local angle = math.random() * 2 * math.pi
+            local radius = 250 + math.random() * 150
+            local x = pos["X"] + math.cos(angle) * radius
+            local z = pos["Z"] + math.sin(angle) * radius
+            kh1.spawn_enemy(model_path, motion_path, x, pos["Y"], z, function(ok, result)
+                -- kh1.spawn_enemy's second return is an entity POINTER on
+                -- success and an error STRING on failure (see the
+                -- spawn_enemy contract comment in KH1-LUA-LIBRARY's
+                -- native/KH1Native/dllmain.cpp). Render the pointer as hex
+                -- rather than letting tostring() print a 15-digit number in
+                -- scientific notation -- math.floor first so the %X is safe
+                -- on a value Lua is holding as a float.
+                local detail
+                if ok and type(result) == "number" then
+                    detail = string.format("spawn_enemy(\"%s\") = %s / entity=0x%X",
+                        model_path, tostring(ok), math.floor(result))
+                else
+                    detail = string.format("spawn_enemy(\"%s\") = %s / %s",
+                        model_path, tostring(ok), tostring(result))
+                end
+                log(detail)
+                -- The deferred reply this effect's PENDING_RESPONSE promised.
+                -- Before this, every spawn reported Success to Crowd Control
+                -- the instant it was QUEUED -- a spawn that then timed out
+                -- waiting on its asset load, or got dropped because a
+                -- cutscene started, still showed as a clean success. Now the
+                -- status reflects what actually happened and `detail` carries
+                -- the reason along with it.
+                send_response(request_id, ok, detail)
             end)
-            return true
+            return PENDING_RESPONSE
         end,
     }
 end
@@ -399,10 +460,26 @@ local function send_game_state_reply(request_id, state)
     ccnet.cc_send(socket_handle, msg .. "\0")
 end
 
-local function send_response(request_id, ok)
+-- `message` is Crowd Control's own EffectResponse `message` field -- optional
+-- secondary text the Crowd Control app surfaces alongside the status, per its
+-- SimpleTCP structure reference (`message` (string?), described there as
+-- secondary text displayed for errors). Passing it is how an effect's real
+-- return value reaches whoever is watching Crowd Control instead of dying in
+-- kh1_crowdcontrol_native.log, which is otherwise the only place any of it
+-- goes. Note that reference only promises the text is DISPLAYED for errors,
+-- so a Success message may or may not render -- the status itself is the part
+-- that's reliably meaningful either way.
+--
+-- Assigns to the local forward-declared at the top of this file (see there) --
+-- deliberately not `local function`, which would shadow it and leave the
+-- enemy-spawn handlers holding a nil upvalue.
+function send_response(request_id, ok, message)
     if not socket_handle then return end
-    local response = json.encode({ id = request_id, type = 0, status = ok and STATUS_SUCCESS or STATUS_FAILURE })
-    ccnet.cc_send(socket_handle, response .. "\0")
+    local payload = { id = request_id, type = 0, status = ok and STATUS_SUCCESS or STATUS_FAILURE }
+    if message then
+        payload.message = message
+    end
+    ccnet.cc_send(socket_handle, json.encode(payload) .. "\0")
 end
 
 -- id/msg_type/code/duration come pre-extracted from ccnet.cc_poll_message --
@@ -426,9 +503,14 @@ local function handle_request(id, msg_type, code, duration)
 
     local handler = effect_handlers[code]
     local ok = false
+    -- Mirrors whatever gets logged below into the response Crowd Control
+    -- itself receives, so a failure's REASON travels with its status instead
+    -- of only landing in kh1_crowdcontrol_native.log (see send_response).
+    local message = nil
 
     if not handler or not handler.apply then
-        log(string.format("No handler for code '%s'", tostring(code)))
+        message = string.format("No handler for code '%s'", tostring(code))
+        log(message)
     else
         local existing = active_timed_effects[code]
         if existing then
@@ -438,14 +520,28 @@ local function handle_request(id, msg_type, code, duration)
             existing.deadline = os.clock() + effect_duration_seconds(duration)
             ok = true
         else
-            local call_ok, apply_ok, revert = pcall(handler.apply)
+            -- id/duration are passed through to apply so a handler that
+            -- can't resolve synchronously can answer its own request later
+            -- (see PENDING_RESPONSE). Handlers that don't care just ignore
+            -- the extra arguments.
+            local call_ok, apply_ok, revert = pcall(handler.apply, id, duration)
             if not call_ok then
                 -- apply_ok holds the error message here, not a boolean --
                 -- pcall's second return on failure is the error, not
                 -- apply_ok's normal meaning.
-                log(string.format("Effect '%s' errored: %s", tostring(code), tostring(apply_ok)))
+                message = string.format("Effect '%s' errored: %s", tostring(code), tostring(apply_ok))
+                log(message)
+            elseif apply_ok == PENDING_RESPONSE then
+                -- The handler has taken ownership of this request's reply and
+                -- will call send_response itself once its async work
+                -- resolves. Returning here is what keeps this id from being
+                -- answered twice -- the second answer would either be a lie
+                -- (a premature Success) or a duplicate.
+                log(string.format("Effect '%s' deferred its response (resolves asynchronously)", tostring(code)))
+                return
             elseif not apply_ok then
-                log(string.format("Effect '%s' handler returned false (bad input?)", tostring(code)))
+                message = string.format("Effect '%s' handler returned false (bad input?)", tostring(code))
+                log(message)
             else
                 log(string.format("Effect '%s' handler returned true (apply call succeeded)", tostring(code)))
             end
@@ -459,7 +555,7 @@ local function handle_request(id, msg_type, code, duration)
         end
     end
 
-    send_response(id, ok)
+    send_response(id, ok, message)
 end
 
 -- ############### --
