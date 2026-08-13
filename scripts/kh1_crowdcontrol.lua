@@ -1,47 +1,5 @@
 ---@diagnostic disable: undefined-global
---[[
-    Bridges Crowd Control (Twitch channel-point redemptions) into KH1 via
-    Crowd Control's SimpleTCP protocol: JSON messages, NUL-terminated, over a
-    raw TCP connection this mod opens as a CLIENT to the Crowd Control app
-    (which hosts the server side) -- see
-    https://developer.crowdcontrol.live/sdk/simpletcp/index.html
 
-    Requires KH1-LUA-LIBRARY to also be installed: kh1_lua_library.lua,
-    json.lua, and kh1_native.dll are require()'d from wherever that sibling
-    mod puts them -- OpenKH's Lua loader resolves require() across every
-    installed mod's scripts/io_packages, not just this mod's own.
-
-    This file must stay directly under scripts/ (NOT scripts/io_packages/) --
-    confirmed against KH1-RANDOMIZER's real entry script
-    (scripts/1fmRandoClient.lua): only .lua files placed directly under
-    scripts/ are auto-loaded and get their global _OnFrame called every frame
-    by the host. Files under scripts/io_packages/ are require()-only
-    libraries that never run on their own (that's where kh1_lua_library.lua
-    itself lives, and where this mod's own kh1_crowdcontrol_native.dll stays
-    -- a require()'d native module doesn't need to be a top-level script).
-
-    INCOMING MESSAGE PARSING (2026-07-20): this mod does NOT decode incoming
-    JSON in Lua. Confirmed live: this modding environment's embedded Lua
-    (LuaBackend) has a real bug where its own string library (string.byte,
-    and anything built on it like string.find/gsub/json.decode) returns
-    nil/garbage for strings longer than ~40 bytes that originated from a
-    native lua_pushlstring call, while the native C API reads the exact same
-    memory correctly. Real effect requests are 300+ bytes, so Lua-side
-    parsing was silently swallowing every one of them -- Crowd Control was
-    sending them correctly the entire time. ccnet.cc_poll_message() does all
-    buffering/NUL-splitting/field-extraction natively in C++ instead, and
-    only ever returns short already-extracted values (a numeric id/type/
-    duration, a short code string), which stay safely under whatever length
-    threshold triggers the bug. json.encode is still used for OUTGOING
-    messages -- those are Lua-created strings, not native-pushed ones, so
-    they aren't affected by this bug regardless of length.
-]]
-
--- kh1_lua_library's functions (soraHP, zantHack, fnc_play_se2, etc.) read
--- version-specific globals that only exist after VersionCheck has required
--- the matching SteamGlobal_*/EGSGlobal_* file -- same require ORDER
--- KH1-RANDOMIZER's own entry script uses. Skipping this would leave every
--- kh1_lua_library call below silently operating on nil addresses.
 require("VersionCheck")
 
 local kh1 = require("kh1_lua_library")
@@ -57,46 +15,18 @@ local socket_handle = nil
 local connecting_handle = nil -- non-nil while a non-blocking connect is in flight (see try_connect)
 local next_reconnect_attempt = 0
 
--- ConsolePrint output isn't visible anywhere by default in this modding
--- environment (confirmed live 2026-07-13) -- everything this mod logs goes
--- through cc_log instead, which appends to kh1_crowdcontrol_native.log
--- (the same file the native DLL's own connection/socket logging already
--- uses -- see README's Troubleshooting section).
 local function log(msg)
     ccnet.cc_log("[Crowd Control] " .. msg)
 end
 
--- Forward declaration. The enemy-spawn handlers below have to answer their
--- Crowd Control request from an async callback that fires several frames
--- later, but send_response itself belongs further down with the rest of the
--- connection code (it needs socket_handle, which doesn't exist yet up here).
--- Declaring the local now lets both halves close over the same upvalue --
--- without this the handlers would capture a nil global instead.
 local send_response
 
--- Sentinel an effect's `apply` can return INSTEAD of a boolean, meaning "the
--- real Success/Failure response for this request will be sent later, by me".
--- handle_request then skips its own send_response so the same request id
--- isn't answered twice. Used by the enemy-spawn effects, whose true outcome
--- isn't known for several frames (kh1.spawn_enemy only queues the request --
--- the asset load behind it can still fail or time out afterwards).
 local PENDING_RESPONSE = {}
 
 -- ####################### --
 -- # Timed-effect tracking # --
 -- ####################### --
 
--- Effects that return a `revert` function from `apply` get auto-reverted
--- this many seconds later (Crowd Control sends `duration` in milliseconds on
--- the request when the pack marks an effect as timed; this is the fallback
--- for untimed/test triggers). Keyed by effect CODE, not request id: a second
--- redemption of the same still-active effect just extends the deadline
--- rather than re-applying (re-applying would re-capture "current" state as
--- the new baseline mid-effect and revert to the wrong value, or race a
--- second revert against the first). This does NOT protect against two
--- DIFFERENT effect codes touching the same underlying value -- whichever
--- reverts last wins. Acceptable jank for a chaos-mod feature; not worth a
--- full resource-lock system here.
 local DEFAULT_DURATION_SECONDS = 30
 local active_timed_effects = {} -- code -> { revert = fn, deadline = number }
 
@@ -121,26 +51,11 @@ end
 -- # Effect dispatch table # --
 -- ####################### --
 
--- Keyed by the effect "code" Crowd Control sends in each request -- these
--- must match the effect ids declared in the game pack (see
--- pack/KH1CrowdControlPack.cs). Each handler is
--- `{ apply = function(request_id, duration) -> ok, revert_fn end }`;
--- `revert_fn` is omitted for instant, one-shot effects and required for
--- anything that should auto-expire. Both arguments are optional to accept --
--- most handlers here declare no parameters at all and simply ignore them.
---
--- `apply` may instead return PENDING_RESPONSE to mean "I'll report my own
--- Success/Failure later" -- that's what request_id is for, and what the
--- enemy-spawn effects use, since their result isn't known until an asset
--- load resolves some frames after the request arrives.
 local effect_handlers = {
     -- ####################### --
-    -- # Combo limit           # --
+    -- # Combo limit         # --
     -- ####################### --
-    -- Captures the real current limits via the library's own getters and
-    -- restores exactly those, rather than assuming a hardcoded vanilla value
-    -- (vanilla itself varies with equipped abilities -- see
-    -- calculate_ground_combo_limit/calculate_air_combo_limit).
+
 
     no_combos = {
         apply = function()
@@ -156,16 +71,8 @@ local effect_handlers = {
     },
 
     -- ####################### --
-    -- # KO / danger           # --
+    -- # KO / danger         # --
     -- ####################### --
-    -- One-shot, no revert -- both of these are real, instantaneous state
-    -- changes (a real KO event-script cold-start, or dropping Sora to 1 HP),
-    -- not something to capture-and-restore later. Neither kh1.ko_sora nor
-    -- kh1.heartless_angel_sora returns a value, so `apply` explicitly
-    -- returns true itself -- otherwise handle_request would read the nil
-    -- return as a failed apply and log/report it as such even though the
-    -- call succeeded. Both already no-op via sora_koed() if Sora is already
-    -- KO'd, so no extra guard is needed here.
 
     ko_sora = {
         apply = function()
@@ -185,21 +92,6 @@ local effect_handlers = {
 -- ####################### --
 -- # Item grants           # --
 -- ####################### --
--- One-shot: spawns a real, collectible item pickup near Sora via
--- kh1.spawn_prize(item_id) (see that function's own doc comment in
--- kh1_lua_library.lua). item_ids below are the "regular item" offsets from
--- KH1's own native item-id space -- cross-confirmed against
--- KH-1FM-AP-LUA/1fmAPConnector.lua's write_item() (writes directly into the
--- inventory byte array at this same offset) and
--- KH1-RANDOMIZER/mod/scripts/1fmRandoGiftTable.lua's gift-table encoding
--- (`{0xF0, item_id % 1000}`, where 0xF0 is the game's own "regular item"
--- type marker), both of which actually run against real KH1FM -- but NEITHER
--- confirms fnc_spawn_prize specifically accepts the same id space (a
--- different native function: spawns a physical pickup entity, not a chest/
--- gift grant or inventory write). Deliberately limited to simple,
--- non-progression consumables/stat-ups -- no keyblades, accessories, world
--- unlocks, or other story-relevant items -- to keep the blast radius small
--- until at least one of these is confirmed live.
 local GIVE_ITEM_EFFECTS = {
     give_potion = 1,
     give_hi_potion = 2,
@@ -226,15 +118,6 @@ end
 -- ####################### --
 -- # Message (preset list) # --
 -- ####################### --
--- Shows a preset message via the map-prize pickup popup
--- (kh1.show_custom_item_popup -- the small window that normally names the
--- item you just got, repurposed to show custom text). Originally meant to
--- be free-typed viewer text, but Crowd Control's team confirmed on Discord
--- (2026-07-13) the SimpleTCP C# pack SDK has NO free-text input at all --
--- only a numeric Quantity slider and Parameters (pick one option from a
--- list, or a hex color). Reworked as discrete per-message effects instead,
--- matching the give_* pattern -- keys here must match the codes declared in
--- pack/KH1CrowdControlPack.cs exactly.
 local MESSAGE_PRESETS = {
     message_gg = "GG",
     message_nice = "Nice!",
@@ -264,29 +147,6 @@ end
 -- ####################### --
 -- # Enemy spawns          # --
 -- ####################### --
--- One-shot: spawns a real Heartless near Sora via kh1.spawn_enemy (queued,
--- non-blocking -- driven every frame by kh1.update_spawn_enemy() in
--- update_crowdcontrol below, same pattern as update_timed_effects). No
--- revert -- this is a real instantaneous state change, not something to
--- capture-and-restore.
---
--- motion_path is looked up from kh1_creature_data at call time rather than
--- derived from model_path -- some reskins (Halloween Town variants) reuse a
--- DIFFERENT base creature's .mset than their own filename would suggest
--- (e.g. xa_ex_2021.mdls's real motion set is xa_ex_2020.mset, not
--- xa_ex_2021.mset) -- confirmed against kh1_creature_data.lua's own table,
--- the same source spawn_enemy's charId/weight/template come from.
---
--- Deliberately excludes 10 of the 50 enemies from the original mapping.
--- 9 of those -- Battleship, Neoshadow, White Mushroom, White Mushroom
--- (Halloween Town), Black Ballade, White Mushroom 2 (Halloween Town),
--- Search Ghost 2 (Halloween Town), Rare Truffles (Halloween Town), Grand
--- Ghost -- aren't present in kh1_creature_data.lua's offline-extracted
--- table, so spawn_enemy's charId/weight/template would default to 0/0/nil
--- for them unless the player already visited that creature's native room
--- live this session -- untested and likely spawns wrong/broken. The 10th,
--- Rare Truffles (non-Halloween-Town), IS present in that table but left out
--- by request.
 local ENEMY_SPAWN_EFFECTS = {
     spawn_shadow = "xa_ex_2020.mdls",
     spawn_soldier = "xa_ex_2010.mdls",
@@ -327,30 +187,14 @@ for code, model_path in pairs(ENEMY_SPAWN_EFFECTS) do
     local known = kh1_creature_data[model_path]
     local motion_path = known and known.motionPath
     effect_handlers[code] = {
-        -- Takes the request id (handle_request passes it to every apply) so
-        -- the async callback below can answer THIS specific redemption --
-        -- see PENDING_RESPONSE for why the reply can't be sent inline.
+
         apply = function(request_id)
-            -- kh1.spawn_enemy defaults to Sora's exact position when x/y/z
-            -- are nil -- two redemptions close together then land
-            -- coincident, zero distance apart. Confirmed 2026-08-04 as a
-            -- likely trigger for a hard crash when a second creature spawns
-            -- while another is already alive (see
-            -- project_spawn_enemy_cold_spawn_crash_containment.md). Radius
-            -- is a first guess, not yet tuned against real room scale.
             local pos = kh1.get_sora_pos()
             local angle = math.random() * 2 * math.pi
             local radius = 250 + math.random() * 150
             local x = pos["X"] + math.cos(angle) * radius
             local z = pos["Z"] + math.sin(angle) * radius
             kh1.spawn_enemy(model_path, motion_path, x, pos["Y"], z, function(ok, result)
-                -- kh1.spawn_enemy's second return is an entity POINTER on
-                -- success and an error STRING on failure (see the
-                -- spawn_enemy contract comment in KH1-LUA-LIBRARY's
-                -- native/KH1Native/dllmain.cpp). Render the pointer as hex
-                -- rather than letting tostring() print a 15-digit number in
-                -- scientific notation -- math.floor first so the %X is safe
-                -- on a value Lua is holding as a float.
                 local detail
                 if ok and type(result) == "number" then
                     detail = string.format("spawn_enemy(\"%s\") = %s / entity=0x%X",
@@ -360,13 +204,6 @@ for code, model_path in pairs(ENEMY_SPAWN_EFFECTS) do
                         model_path, tostring(ok), tostring(result))
                 end
                 log(detail)
-                -- The deferred reply this effect's PENDING_RESPONSE promised.
-                -- Before this, every spawn reported Success to Crowd Control
-                -- the instant it was QUEUED -- a spawn that then timed out
-                -- waiting on its asset load, or got dropped because a
-                -- cutscene started, still showed as a clean success. Now the
-                -- status reflects what actually happened and `detail` carries
-                -- the reason along with it.
                 send_response(request_id, ok, detail)
             end)
             return PENDING_RESPONSE
@@ -374,37 +211,10 @@ for code, model_path in pairs(ENEMY_SPAWN_EFFECTS) do
     }
 end
 
--- ####################### --
--- # Deliberately NOT wired # --
--- ####################### --
--- grant_sora_ability / grant_shared_ability / enable_ability: take raw
---   numeric ability ids (or a curated name table, for enable_ability) but
---   there's no ability-granting effect category wired up.
--- set_stock_at_index / set_gummi_qty_at_index: index-based with no known
---   index->item mapping (same guessed-id risk as spawn_prize's item_id).
--- set_sora_walk_speed / set_sora_run_speed: no getter exists, so there's no
---   way to capture-and-restore the real original -- and no documented
---   vanilla baseline anywhere in this codebase to revert to instead.
--- set_spell_cost: no getter exists (unlike effectiveness), so cost changes
---   can't be safely reverted either.
--- set_attack_animation_data / set_command_data: raw array writes into
---   engine tables with no documented safe shape/range -- highest guessed-risk
---   functions in the library.
--- show_prompt: the MESSAGE_PRESETS effects above already cover "show custom
---   text" more simply; show_prompt's multi-box/color parameter shape isn't
---   worth the extra complexity for the same end result.
--- make_sora_actionable: an unstick/debug utility, not really a chaos effect
---   (no inverse action, nothing meaningful to revert).
-
 -- ############### --
 -- # Connection    # --
 -- ############### --
 
--- Starts a NON-BLOCKING connect (see cc_connect's own comment in
--- dllmain.cpp -- a blocking connect here was observed causing multi-second
--- game freezes on every reconnect attempt). This only kicks off the
--- attempt; update_crowdcontrol polls cc_connect_status(connecting_handle)
--- every frame until it resolves to "connected" or "failed".
 local function try_connect()
     local ok, handle_or_err = ccnet.cc_connect(CC_HOST, CC_PORT)
     if ok then
@@ -433,10 +243,6 @@ end
 local STATUS_SUCCESS = 0
 local STATUS_FAILURE = 1
 
--- GameUpdate message (type 0xFD / 253): a REQUEST from Crowd Control for
--- updated game state, not a plain keepalive (corrected 2026-07-20 -- see
--- header comment). "ready" is the only game state where Crowd Control will
--- actually dispatch effects.
 local GAME_UPDATE_TYPE = 253
 
 local function send_game_state(state)
@@ -446,45 +252,31 @@ local function send_game_state(state)
     log(string.format("Sent game state: %s", state))
 end
 
--- Suppressing effects AT THE SOURCE during a cutscene, rather than accepting each redemption and
--- bouncing it: Crowd Control only dispatches while the state is "ready", so reporting otherwise
--- stops viewers being offered effects the game would just refuse.
---
--- CAVEAT: the exact not-ready spelling is UNCONFIRMED against Crowd Control's own GameState enum.
--- "ready" is known to work because this mod already sends it; the counterpart is a guess. If Crowd
--- Control rejects or ignores an unknown value the state simply stays "ready" and effects keep
--- flowing -- which is precisely why the per-effect cutscene gate in handle_request is KEPT as a
--- backstop rather than replaced by this. Confirm against a live cutscene before trusting it alone.
 local STATE_READY = "ready"
 local STATE_NOT_READY = "notready"
 local last_reported_state = nil
 
+local function effects_blocked_reason()
+    if ReadInt(inCutscene) ~= 0 then
+        return "a cutscene is playing"
+    end
+    if kh1.is_in_gummi_garage() then
+        return "the player is in the gummi ship"
+    end
+    return nil
+end
+
 local function current_game_state()
-    if ReadInt(inCutscene) ~= 0 then return STATE_NOT_READY end
+    if effects_blocked_reason() then return STATE_NOT_READY end
     return STATE_READY
 end
 
--- Reply to a SPECIFIC incoming GameUpdate request (echoes its `id`), as
--- opposed to send_game_state's unprompted announcement.
 local function send_game_state_reply(request_id, state)
     if not socket_handle then return end
     local msg = json.encode({ id = request_id, type = GAME_UPDATE_TYPE, state = state })
     ccnet.cc_send(socket_handle, msg .. "\0")
 end
 
--- `message` is Crowd Control's own EffectResponse `message` field -- optional
--- secondary text the Crowd Control app surfaces alongside the status, per its
--- SimpleTCP structure reference (`message` (string?), described there as
--- secondary text displayed for errors). Passing it is how an effect's real
--- return value reaches whoever is watching Crowd Control instead of dying in
--- kh1_crowdcontrol_native.log, which is otherwise the only place any of it
--- goes. Note that reference only promises the text is DISPLAYED for errors,
--- so a Success message may or may not render -- the status itself is the part
--- that's reliably meaningful either way.
---
--- Assigns to the local forward-declared at the top of this file (see there) --
--- deliberately not `local function`, which would shadow it and leave the
--- enemy-spawn handlers holding a nil upvalue.
 function send_response(request_id, ok, message)
     if not socket_handle then return end
     local payload = { id = request_id, type = 0, status = ok and STATUS_SUCCESS or STATUS_FAILURE }
@@ -494,8 +286,6 @@ function send_response(request_id, ok, message)
     ccnet.cc_send(socket_handle, json.encode(payload) .. "\0")
 end
 
--- id/msg_type/code/duration come pre-extracted from ccnet.cc_poll_message --
--- see header comment for why this mod no longer decodes JSON in Lua at all.
 local function handle_request(id, msg_type, code, duration)
     log(string.format("Received request: id=%s type=%s code=%s duration=%s",
         tostring(id), tostring(msg_type), tostring(code), tostring(duration)))
@@ -505,27 +295,14 @@ local function handle_request(id, msg_type, code, duration)
         return
     end
 
-    -- Other non-effect protocol messages (no `code` field) -- e.g. type
-    -- 0x02 EffectStop, which Crowd Control's reference documents but this
-    -- mod doesn't yet implement handling for. Deliberately left unanswered
-    -- rather than guessing at an unconfirmed response shape.
     if code == nil then
         return
     end
 
-    -- Cutscene gate, applied to EVERY effect.
-    --
-    -- kh1.spawn_enemy already refuses mid-cutscene on its own, and for the same reasons the rest of
-    -- these should too: during a scripted sequence the player has no control, most effects either do
-    -- nothing visible or fight the sequence, and a few (KO Sora, combo limits) can leave the game in
-    -- a state the cutscene's own scripting did not expect. Blocking here rather than in each handler
-    -- keeps it in one place -- there is no effect for which "apply this mid-cutscene" is correct.
-    --
-    -- STATUS_FAILURE is the RETRYABLE status (Crowd Control renders it "Temporary Failure" and
-    -- re-offers the redemption), so the viewer is not charged for something the game swallowed.
-    if ReadInt(inCutscene) ~= 0 then
-        local message = string.format(
-            "Ignored '%s' -- a cutscene is playing; try again once it ends", tostring(code))
+    local blocked = effects_blocked_reason()
+    if blocked then
+        local message = string.format("Ignored '%s' -- %s; try again afterwards",
+                                      tostring(code), blocked)
         log(message)
         send_response(id, false, message)
         return
@@ -533,9 +310,6 @@ local function handle_request(id, msg_type, code, duration)
 
     local handler = effect_handlers[code]
     local ok = false
-    -- Mirrors whatever gets logged below into the response Crowd Control
-    -- itself receives, so a failure's REASON travels with its status instead
-    -- of only landing in kh1_crowdcontrol_native.log (see send_response).
     local message = nil
 
     if not handler or not handler.apply then
@@ -544,29 +318,14 @@ local function handle_request(id, msg_type, code, duration)
     else
         local existing = active_timed_effects[code]
         if existing then
-            -- Already active: extend the timer instead of re-applying (see
-            -- active_timed_effects' comment for why re-applying would be
-            -- wrong here).
             existing.deadline = os.clock() + effect_duration_seconds(duration)
             ok = true
         else
-            -- id/duration are passed through to apply so a handler that
-            -- can't resolve synchronously can answer its own request later
-            -- (see PENDING_RESPONSE). Handlers that don't care just ignore
-            -- the extra arguments.
             local call_ok, apply_ok, revert = pcall(handler.apply, id, duration)
             if not call_ok then
-                -- apply_ok holds the error message here, not a boolean --
-                -- pcall's second return on failure is the error, not
-                -- apply_ok's normal meaning.
                 message = string.format("Effect '%s' errored: %s", tostring(code), tostring(apply_ok))
                 log(message)
             elseif apply_ok == PENDING_RESPONSE then
-                -- The handler has taken ownership of this request's reply and
-                -- will call send_response itself once its async work
-                -- resolves. Returning here is what keeps this id from being
-                -- answered twice -- the second answer would either be a lie
-                -- (a premature Success) or a duplicate.
                 log(string.format("Effect '%s' deferred its response (resolves asynchronously)", tostring(code)))
                 return
             elseif not apply_ok then
@@ -593,16 +352,7 @@ end
 -- ############### --
 
 function update_crowdcontrol()
-    --[[Drives the whole connection: reconnects to the Crowd Control app on a
-    timer while disconnected, reverts any timed effects whose deadline has
-    passed, and otherwise drains any complete messages off the socket (via
-    ccnet.cc_poll_message, which parses natively -- see header comment) and
-    dispatches each to effect_handlers. Call this every frame from _OnFrame
-    -- mirrors kh1_lua_library's update_text_boxes() pattern.]]
     update_timed_effects()
-
-    -- Drives any pending spawn_enemy request queued by an enemy-spawn
-    -- effect above -- harmless/no-op if nothing is pending.
     kh1.update_spawn_enemy()
 
     if connecting_handle then
@@ -618,7 +368,6 @@ function update_crowdcontrol()
             connecting_handle = nil
             next_reconnect_attempt = os.clock() + RECONNECT_INTERVAL_SECONDS
         end
-        -- status == "connecting": keep waiting, poll again next frame.
         return
     end
 
@@ -631,16 +380,12 @@ function update_crowdcontrol()
         return
     end
 
-    -- Tell Crowd Control the moment the cutscene state flips, so it stops (and resumes) offering
-    -- effects without waiting for its next poll. Edge-triggered: sending every frame would spam.
     local state = current_game_state()
     if state ~= last_reported_state then
         last_reported_state = state
         send_game_state(state)
     end
 
-    -- Drain every complete message buffered this frame -- one recv() can
-    -- contain several back-to-back messages.
     while true do
         local status, a, b, c, d = ccnet.cc_poll_message(socket_handle)
         if status == "message" then
@@ -650,26 +395,15 @@ function update_crowdcontrol()
             log(string.format("Connection lost (%s), will retry", tostring(a)))
             disconnect()
             break
-        else -- "none"
+        else
             break
         end
     end
 end
 
--- The host's Lua loader warns ("the event handler for initialization either
--- has errors or does not exist") if a top-level script never defines
--- _OnInit -- every real script in KH1-RANDOMIZER's scripts/ folder has one.
--- All of this mod's actual init work (VersionCheck's version detection,
--- setting canExecute) already ran synchronously above via require()
--- before this point, so there's nothing left to do here besides exist.
 function _OnInit()
 end
 
--- This is a top-level scripts/ entry file (see header comment), not a
--- required library, so it owns _OnFrame outright -- same plain global-function
--- style as KH1-RANDOMIZER's scripts/1fmRandoClient.lua. Each top-level script
--- gets its own globals, so this doesn't collide with other installed mods'
--- own _OnFrame.
 function _OnFrame()
     if canExecute then
         update_crowdcontrol()
