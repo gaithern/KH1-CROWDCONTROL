@@ -3,7 +3,7 @@
 require("VersionCheck")
 
 local kh1 = require("kh1_lua_library")
-local kh1_creature_data = require("kh1_creature_data")
+local kh1_creature_data = require("kh1_lua_library.creature_data")
 local json = require("json")
 local ccnet = require("kh1_crowdcontrol_native")
 
