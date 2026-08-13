@@ -23,6 +23,7 @@ namespace CrowdControl.Games.Packs.KH1FM
         private const string ItemFolder = "Items";
         private const string MessageFolder = "Message";
         private const string ComboFolder = "Combos";
+        private const string AbilityFolder = "Abilities";
         private const string DangerFolder = "Danger";
         private const string EnemyFolder = "Enemies";
 
@@ -60,7 +61,34 @@ namespace CrowdControl.Games.Packs.KH1FM
             new Effect("Show Message: L take", "message_ltake") {Category = MessageFolder, Price = 50, Description = "Shows \"L take\" in the item-pickup popup."},
 
             new Effect("No Combos", "no_combos")
-                {Category = ComboFolder, Price = 100, Duration = 30, Description = "Temporarily drops Sora's ground and air combo limits to 1 (no combo strings)."},
+                {Category = ComboFolder, Price = 100, Description = "Drops Sora's ground and air combo limits to 1 (no combo strings) until the next menu or room transition."},
+
+            // Force-enabled until the next menu or room transition, at which point the
+            // game recomputes the flag from Sora's actually-equipped abilities.
+            new Effect("Enable Vortex", "ability_vortex") {Category = AbilityFolder, Price = 10, Description = "Force-enables Vortex, even if Sora doesn't have it equipped."},
+            new Effect("Enable Aerial Sweep", "ability_aerial_sweep") {Category = AbilityFolder, Price = 10, Description = "Force-enables Aerial Sweep, even if Sora doesn't have it equipped."},
+            new Effect("Enable Counterattack", "ability_counterattack") {Category = AbilityFolder, Price = 10, Description = "Force-enables Counterattack, even if Sora doesn't have it equipped."},
+            new Effect("Enable Blitz", "ability_blitz") {Category = AbilityFolder, Price = 10, Description = "Force-enables Blitz, even if Sora doesn't have it equipped."},
+            new Effect("Enable Guard", "ability_guard") {Category = AbilityFolder, Price = 10, Description = "Force-enables Guard, even if Sora doesn't have it equipped."},
+            new Effect("Enable Dodge Roll", "ability_dodge_roll") {Category = AbilityFolder, Price = 10, Description = "Force-enables Dodge Roll, even if Sora doesn't have it equipped."},
+            new Effect("Enable Cheer", "ability_cheer") {Category = AbilityFolder, Price = 10, Description = "Force-enables Cheer, even if Sora doesn't have it equipped."},
+            new Effect("Enable Slapshot", "ability_slapshot") {Category = AbilityFolder, Price = 10, Description = "Force-enables Slapshot, even if Sora doesn't have it equipped."},
+            new Effect("Enable Sliding Dash", "ability_sliding_dash") {Category = AbilityFolder, Price = 10, Description = "Force-enables Sliding Dash, even if Sora doesn't have it equipped."},
+            new Effect("Enable Hurricane Blast", "ability_hurricane_blast") {Category = AbilityFolder, Price = 10, Description = "Force-enables Hurricane Blast, even if Sora doesn't have it equipped."},
+            new Effect("Enable Ripple Drive", "ability_ripple_drive") {Category = AbilityFolder, Price = 10, Description = "Force-enables Ripple Drive, even if Sora doesn't have it equipped."},
+            new Effect("Enable Stun Impact", "ability_stun_impact") {Category = AbilityFolder, Price = 10, Description = "Force-enables Stun Impact, even if Sora doesn't have it equipped."},
+            new Effect("Enable Gravity Break", "ability_gravity_break") {Category = AbilityFolder, Price = 10, Description = "Force-enables Gravity Break, even if Sora doesn't have it equipped."},
+            new Effect("Enable Zantetsuken", "ability_zantetsuken") {Category = AbilityFolder, Price = 10, Description = "Force-enables Zantetsuken, even if Sora doesn't have it equipped."},
+            new Effect("Enable Sonic Blade", "ability_sonic_blade") {Category = AbilityFolder, Price = 10, Description = "Force-enables Sonic Blade, even if Sora doesn't have it equipped."},
+            new Effect("Enable Ars Arcanum", "ability_ars_arcanum") {Category = AbilityFolder, Price = 10, Description = "Force-enables Ars Arcanum, even if Sora doesn't have it equipped."},
+            new Effect("Enable Strike Raid", "ability_strike_raid") {Category = AbilityFolder, Price = 10, Description = "Force-enables Strike Raid, even if Sora doesn't have it equipped."},
+            new Effect("Enable Ragnarok", "ability_ragnarok") {Category = AbilityFolder, Price = 10, Description = "Force-enables Ragnarok, even if Sora doesn't have it equipped."},
+            new Effect("Enable Trinity Limit", "ability_trinity_limit") {Category = AbilityFolder, Price = 10, Description = "Force-enables Trinity Limit, even if Sora doesn't have it equipped."},
+            new Effect("Enable MP Haste", "ability_mp_haste") {Category = AbilityFolder, Price = 10, Description = "Force-enables MP Haste, even if Sora doesn't have it equipped."},
+            new Effect("Enable MP Rage", "ability_mp_rage") {Category = AbilityFolder, Price = 10, Description = "Force-enables MP Rage, even if Sora doesn't have it equipped."},
+            new Effect("Enable Second Chance", "ability_second_chance") {Category = AbilityFolder, Price = 10, Description = "Force-enables Second Chance, even if Sora doesn't have it equipped."},
+            new Effect("Enable Berserk", "ability_berserk") {Category = AbilityFolder, Price = 10, Description = "Force-enables Berserk, even if Sora doesn't have it equipped."},
+            new Effect("Enable Leaf Bracer", "ability_leaf_bracer") {Category = AbilityFolder, Price = 10, Description = "Force-enables Leaf Bracer, even if Sora doesn't have it equipped."},
 
             new Effect("KO Sora", "ko_sora") {Category = DangerFolder, Price = 150, Description = "Instantly triggers Sora's real in-game KO sequence (death animation + Game Over)."},
             new Effect("Heartless Angel", "heartless_angel_sora") {Category = DangerFolder, Price = 90, Description = "Drops Sora to 1 HP, same as Sephiroth's Heartless Angel move."},

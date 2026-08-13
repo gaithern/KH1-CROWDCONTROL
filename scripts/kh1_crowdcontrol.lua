@@ -24,30 +24,6 @@ local send_response
 local PENDING_RESPONSE = {}
 
 -- ####################### --
--- # Timed-effect tracking # --
--- ####################### --
-
-local DEFAULT_DURATION_SECONDS = 30
-local active_timed_effects = {} -- code -> { revert = fn, deadline = number }
-
-local function effect_duration_seconds(duration_ms)
-    if duration_ms and duration_ms > 0 then
-        return duration_ms / 1000 -- Crowd Control sends duration in milliseconds
-    end
-    return DEFAULT_DURATION_SECONDS
-end
-
-local function update_timed_effects()
-    local now = os.clock()
-    for code, effect in pairs(active_timed_effects) do
-        if now >= effect.deadline then
-            pcall(effect.revert)
-            active_timed_effects[code] = nil
-        end
-    end
-end
-
--- ####################### --
 -- # Effect dispatch table # --
 -- ####################### --
 
@@ -57,16 +33,13 @@ local effect_handlers = {
     -- ####################### --
 
 
+    -- The game itself restores the combo limits on the next menu or room
+    -- transition, so this is a one-shot effect with no revert timer.
     no_combos = {
         apply = function()
-            local original_ground = kh1.get_ground_combo_length_limit()
-            local original_air = kh1.get_air_combo_length_limit()
             kh1.set_ground_combo_length_limit(1)
             kh1.set_air_combo_length_limit(1)
-            return true, function()
-                kh1.set_ground_combo_length_limit(original_ground)
-                kh1.set_air_combo_length_limit(original_air)
-            end
+            return true
         end,
     },
 
@@ -88,6 +61,46 @@ local effect_handlers = {
         end,
     },
 }
+
+-- ####################### --
+-- # Ability grants        # --
+-- ####################### --
+local ABILITY_EFFECTS = {
+    ability_vortex          = "Vortex",
+    ability_aerial_sweep    = "Aerial Sweep",
+    ability_counterattack   = "Counterattack",
+    ability_blitz           = "Blitz",
+    ability_guard           = "Guard",
+    ability_dodge_roll      = "Dodge Roll",
+    ability_cheer           = "Cheer",
+    ability_slapshot        = "Slapshot",
+    ability_sliding_dash    = "Sliding Dash",
+    ability_hurricane_blast = "Hurricane Blast",
+    ability_ripple_drive    = "Ripple Drive",
+    ability_stun_impact     = "Stun Impact",
+    ability_gravity_break   = "Gravity Break",
+    ability_zantetsuken     = "Zantetsuken",
+    ability_sonic_blade     = "Sonic Blade",
+    ability_ars_arcanum     = "Ars Arcanum",
+    ability_strike_raid     = "Strike Raid",
+    ability_ragnarok        = "Ragnarok",
+    ability_trinity_limit   = "Trinity Limit",
+    ability_mp_haste        = "MP Haste",
+    ability_mp_rage         = "MP Rage",
+    ability_second_chance   = "Second Chance",
+    ability_berserk         = "Berserk",
+    ability_leaf_bracer     = "Leaf Bracer",
+}
+for code, ability_name in pairs(ABILITY_EFFECTS) do
+    effect_handlers[code] = {
+        apply = function()
+            -- enable_ability returns nothing; a silent no-op on an unrecognised
+            -- name is the only failure mode, and the names are fixed above.
+            kh1.enable_ability(ability_name)
+            return true
+        end,
+    }
+end
 
 -- ####################### --
 -- # Item grants           # --
@@ -316,32 +329,20 @@ local function handle_request(id, msg_type, code, duration)
         message = string.format("No handler for code '%s'", tostring(code))
         log(message)
     else
-        local existing = active_timed_effects[code]
-        if existing then
-            existing.deadline = os.clock() + effect_duration_seconds(duration)
-            ok = true
+        local call_ok, apply_ok = pcall(handler.apply, id)
+        if not call_ok then
+            message = string.format("Effect '%s' errored: %s", tostring(code), tostring(apply_ok))
+            log(message)
+        elseif apply_ok == PENDING_RESPONSE then
+            log(string.format("Effect '%s' deferred its response (resolves asynchronously)", tostring(code)))
+            return
+        elseif not apply_ok then
+            message = string.format("Effect '%s' handler returned false (bad input?)", tostring(code))
+            log(message)
         else
-            local call_ok, apply_ok, revert = pcall(handler.apply, id, duration)
-            if not call_ok then
-                message = string.format("Effect '%s' errored: %s", tostring(code), tostring(apply_ok))
-                log(message)
-            elseif apply_ok == PENDING_RESPONSE then
-                log(string.format("Effect '%s' deferred its response (resolves asynchronously)", tostring(code)))
-                return
-            elseif not apply_ok then
-                message = string.format("Effect '%s' handler returned false (bad input?)", tostring(code))
-                log(message)
-            else
-                log(string.format("Effect '%s' handler returned true (apply call succeeded)", tostring(code)))
-            end
-            ok = call_ok and apply_ok and true or false
-            if ok and revert then
-                active_timed_effects[code] = {
-                    revert = revert,
-                    deadline = os.clock() + effect_duration_seconds(duration),
-                }
-            end
+            log(string.format("Effect '%s' handler returned true (apply call succeeded)", tostring(code)))
         end
+        ok = call_ok and apply_ok and true or false
     end
 
     send_response(id, ok, message)
@@ -352,7 +353,6 @@ end
 -- ############### --
 
 function update_crowdcontrol()
-    update_timed_effects()
     kh1.update_spawn_enemy()
 
     if connecting_handle then
