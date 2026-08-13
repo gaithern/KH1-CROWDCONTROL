@@ -516,6 +516,24 @@ local function send_game_state(state)
     log(string.format("Sent game state: %s", state))
 end
 
+-- Suppressing effects AT THE SOURCE during a cutscene, rather than accepting each redemption and
+-- bouncing it: Crowd Control only dispatches while the state is "ready", so reporting otherwise
+-- stops viewers being offered effects the game would just refuse.
+--
+-- CAVEAT: the exact not-ready spelling is UNCONFIRMED against Crowd Control's own GameState enum.
+-- "ready" is known to work because this mod already sends it; the counterpart is a guess. If Crowd
+-- Control rejects or ignores an unknown value the state simply stays "ready" and effects keep
+-- flowing -- which is precisely why the per-effect cutscene gate in handle_request is KEPT as a
+-- backstop rather than replaced by this. Confirm against a live cutscene before trusting it alone.
+local STATE_READY = "ready"
+local STATE_NOT_READY = "notready"
+local last_reported_state = nil
+
+local function current_game_state()
+    if ReadInt(inCutscene) ~= 0 then return STATE_NOT_READY end
+    return STATE_READY
+end
+
 -- Reply to a SPECIFIC incoming GameUpdate request (echoes its `id`), as
 -- opposed to send_game_state's unprompted announcement.
 local function send_game_state_reply(request_id, state)
@@ -553,7 +571,7 @@ local function handle_request(id, msg_type, code, duration)
         tostring(id), tostring(msg_type), tostring(code), tostring(duration)))
 
     if msg_type == GAME_UPDATE_TYPE then
-        send_game_state_reply(id, "ready")
+        send_game_state_reply(id, current_game_state())
         return
     end
 
@@ -562,6 +580,24 @@ local function handle_request(id, msg_type, code, duration)
     -- mod doesn't yet implement handling for. Deliberately left unanswered
     -- rather than guessing at an unconfirmed response shape.
     if code == nil then
+        return
+    end
+
+    -- Cutscene gate, applied to EVERY effect.
+    --
+    -- kh1.spawn_enemy already refuses mid-cutscene on its own, and for the same reasons the rest of
+    -- these should too: during a scripted sequence the player has no control, most effects either do
+    -- nothing visible or fight the sequence, and a few (KO Sora, combo limits) can leave the game in
+    -- a state the cutscene's own scripting did not expect. Blocking here rather than in each handler
+    -- keeps it in one place -- there is no effect for which "apply this mid-cutscene" is correct.
+    --
+    -- STATUS_FAILURE is the RETRYABLE status (Crowd Control renders it "Temporary Failure" and
+    -- re-offers the redemption), so the viewer is not charged for something the game swallowed.
+    if ReadInt(inCutscene) ~= 0 then
+        local message = string.format(
+            "Ignored '%s' -- a cutscene is playing; try again once it ends", tostring(code))
+        log(message)
+        send_response(id, false, message)
         return
     end
 
@@ -645,7 +681,8 @@ function update_crowdcontrol()
             socket_handle = connecting_handle
             connecting_handle = nil
             log(string.format("Connected to %s:%d", CC_HOST, CC_PORT))
-            send_game_state("ready")
+            last_reported_state = current_game_state()
+            send_game_state(last_reported_state)
         elseif status == "failed" then
             ccnet.cc_close(connecting_handle)
             connecting_handle = nil
@@ -662,6 +699,14 @@ function update_crowdcontrol()
             try_connect()
         end
         return
+    end
+
+    -- Tell Crowd Control the moment the cutscene state flips, so it stops (and resumes) offering
+    -- effects without waiting for its next poll. Edge-triggered: sending every frame would spam.
+    local state = current_game_state()
+    if state ~= last_reported_state then
+        last_reported_state = state
+        send_game_state(state)
     end
 
     -- Drain every complete message buffered this frame -- one recv() can
