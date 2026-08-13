@@ -99,9 +99,6 @@ namespace CrowdControl.Games.Packs.KH1FM
             new Effect("Spawn Sniperwild", "spawn_sniperwild") {Category = EnemyFolder, Price = 100, Description = "Spawns a Sniperwild near Sora."},
             new Effect("Spawn Pink Agaricus", "spawn_pink_agaricus") {Category = EnemyFolder, Price = 100, Description = "Spawns a Pink Agaricus near Sora."},
             new Effect("Spawn Black Fungi", "spawn_black_fungi") {Category = EnemyFolder, Price = 100, Description = "Spawns a Black Fungi near Sora."},
-            // Reuses a creature already loaded in the room, so it needs no free slots and works in
-            // busy rooms where the fixed-creature spawns above have to refuse.
-            new Effect("Spawn Random (Already Loaded)", "spawn_random_loaded") {Category = EnemyFolder, Price = 100, Description = "Spawns a random creature that this room already has loaded, near Sora."},
         };
     }
 }
