@@ -99,12 +99,9 @@ namespace CrowdControl.Games.Packs.KH1FM
             new Effect("Spawn Sniperwild", "spawn_sniperwild") {Category = EnemyFolder, Price = 100, Description = "Spawns a Sniperwild near Sora."},
             new Effect("Spawn Pink Agaricus", "spawn_pink_agaricus") {Category = EnemyFolder, Price = 100, Description = "Spawns a Pink Agaricus near Sora."},
             new Effect("Spawn Black Fungi", "spawn_black_fungi") {Category = EnemyFolder, Price = 100, Description = "Spawns a Black Fungi near Sora."},
-            new Effect("Spawn Shadow (Halloween Town)", "spawn_shadow_ht") {Category = EnemyFolder, Price = 100, Description = "Spawns a Halloween Town Shadow near Sora."},
-            new Effect("Spawn Search Ghost (Halloween Town)", "spawn_search_ghost_ht") {Category = EnemyFolder, Price = 100, Description = "Spawns a Halloween Town Search Ghost near Sora."},
-            new Effect("Spawn Gargoyle (Halloween Town)", "spawn_gargoyle_ht") {Category = EnemyFolder, Price = 100, Description = "Spawns a Halloween Town Gargoyle near Sora."},
-            new Effect("Spawn Wight Knight (Halloween Town)", "spawn_wight_knight_ht") {Category = EnemyFolder, Price = 100, Description = "Spawns a Halloween Town Wight Knight near Sora."},
-            new Effect("Spawn Wizard (Halloween Town)", "spawn_wizard_ht") {Category = EnemyFolder, Price = 100, Description = "Spawns a Halloween Town Wizard near Sora."},
-            new Effect("Spawn Darkball (Halloween Town)", "spawn_darkball_ht") {Category = EnemyFolder, Price = 100, Description = "Spawns a Halloween Town Darkball near Sora."},
+            // Reuses a creature already loaded in the room, so it needs no free slots and works in
+            // busy rooms where the fixed-creature spawns above have to refuse.
+            new Effect("Spawn Random (Already Loaded)", "spawn_random_loaded") {Category = EnemyFolder, Price = 100, Description = "Spawns a random creature that this room already has loaded, near Sora."},
         };
     }
 }
