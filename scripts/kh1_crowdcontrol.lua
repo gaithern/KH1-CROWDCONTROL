@@ -265,23 +265,34 @@ local function send_game_state(state)
     log(string.format("Sent game state: %s", state))
 end
 
-local STATE_READY = "ready"
-local STATE_NOT_READY = "notready"
 local last_reported_state = nil
 
-local function effects_blocked_reason()
+-- Is it safe to fire an effect right now? Returns a Crowd Control GameState + a reason.
+-- `menu`/`title` follow the sibling speedrun/rando mods' convention (0 = not in one).
+local function get_effect_readiness()
+    if ReadByte(title) ~= 0 then
+        return "menu", "the game is on the title screen"
+    end
     if ReadInt(inCutscene) ~= 0 then
-        return "a cutscene is playing"
+        return "cutscene", "a cutscene is playing"
+    end
+    if ReadByte(menu) ~= 0 then
+        return "menu", "a menu is open"
     end
     if kh1.is_in_gummi_garage() then
-        return "the player is in the gummi ship"
+        return "wrongMode", "the player is in the Gummi ship"
     end
-    return nil
+    if kh1.sora_koed() then
+        return "badPlayerState", "Sora is KO'd"
+    end
+    return "ready", nil
 end
 
+-- This used to send "notready", which isn't a state Crowd Control recognises and was ignored.
 local function current_game_state()
-    if effects_blocked_reason() then return STATE_NOT_READY end
-    return STATE_READY
+    -- Drops the second return value; callers pass this straight into message builders.
+    local state = get_effect_readiness()
+    return state
 end
 
 local function send_game_state_reply(request_id, state)
@@ -312,10 +323,10 @@ local function handle_request(id, msg_type, code, duration)
         return
     end
 
-    local blocked = effects_blocked_reason()
-    if blocked then
+    local state, reason = get_effect_readiness()
+    if state ~= "ready" then
         local message = string.format("Ignored '%s' -- %s; try again afterwards",
-                                      tostring(code), blocked)
+                                      tostring(code), reason or state)
         log(message)
         send_response(id, false, message)
         return
