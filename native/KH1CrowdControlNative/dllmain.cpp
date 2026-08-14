@@ -68,21 +68,6 @@ static bool EnsureWinsock() {
 }
 
 // cc_connect(host, port) -> ok(boolean), handle(integer) | errorMessage(string)
-//
-// Non-blocking connect: the socket is switched to non-blocking BEFORE
-// connect() is called, so connect() returns immediately regardless of
-// whether the Crowd Control app is actually listening yet. `ok=true` here
-// only means "connection attempt started", NOT "connected" -- callers must
-// poll cc_connect_status(handle) until it reports "connected" before using
-// cc_send/cc_recv.
-//
-// This used to be a deliberately blocking connect(), on the assumption that
-// a loopback (127.0.0.1) connect either succeeds or is refused near-
-// instantly. That assumption doesn't hold in practice -- observed causing
-// multi-second game freezes on every reconnect attempt (every
-// RECONNECT_INTERVAL_SECONDS) whenever the Crowd Control SDK/app wasn't yet
-// listening on the port, since a blocking connect() on the game's own frame
-// thread stalls the entire game for however long that connect takes.
 extern "C" int l_cc_connect(void* L) {
     if (!EnsureWinsock()) {
         p_lua_pushboolean(L, 0);
@@ -125,8 +110,6 @@ extern "C" int l_cc_connect(void* L) {
         return 2;
     }
 
-    // Switched to non-blocking BEFORE connect() (not after) -- this is what
-    // makes connect() itself return immediately instead of blocking.
     u_long nonBlocking = 1;
     ioctlsocket(s, FIONBIO, &nonBlocking);
 
@@ -141,8 +124,6 @@ extern "C" int l_cc_connect(void* L) {
             p_lua_pushstring(L, "cc_connect: connection refused or unreachable");
             return 2;
         }
-        // WSAEWOULDBLOCK is the expected/normal case for a non-blocking
-        // connect that hasn't completed yet -- not a failure.
     }
 
     LogDebug("cc_connect: connect initiated (non-blocking), awaiting cc_connect_status");
@@ -151,10 +132,6 @@ extern "C" int l_cc_connect(void* L) {
     return 2;
 }
 
-// cc_connect_status(handle) -> "connecting" | "connected" | "failed"
-// Polls a non-blocking connect() started by cc_connect using select() with
-// a zero timeout, so this never blocks either. Call this every frame while
-// "connecting" until it stops saying so.
 extern "C" int l_cc_connect_status(void* L) {
     SOCKET s = (SOCKET)p_lua_tointegerx(L, 1, nullptr);
 
@@ -201,10 +178,6 @@ extern "C" int l_cc_connect_status(void* L) {
     return 1;
 }
 
-// cc_send(handle, data) -> ok(boolean), errorMessage(string, only on failure)
-// `data` is sent exactly as given (binary-safe, via lua_tolstring's explicit
-// length -- Crowd Control's SimpleTCP framing appends its own NUL terminator
-// per message, which the Lua glue is responsible for, not this function).
 extern "C" int l_cc_send(void* L) {
     SOCKET s = (SOCKET)p_lua_tointegerx(L, 1, nullptr);
     size_t len = 0;
@@ -229,10 +202,6 @@ extern "C" int l_cc_send(void* L) {
     return 1;
 }
 
-// cc_recv(handle) -> data(string) | nil, errorMessage(string)
-// Non-blocking: returns "" (not nil) when the socket is open but nothing is
-// available yet -- only returns nil on an actual close/reset, so the glue
-// script can tell "poll again next frame" apart from "reconnect".
 static const int RECV_BUFFER_SIZE = 4096;
 
 extern "C" int l_cc_recv(void* L) {
@@ -266,30 +235,8 @@ extern "C" int l_cc_recv(void* L) {
 }
 
 // --- MESSAGE BUFFERING & FIELD EXTRACTION ---
-// Confirmed live 2026-07-20: this modding environment's embedded Lua
-// (LuaBackend) has a real bug where its OWN string library (string.byte,
-// and by extension anything built on it like gsub/find/json.decode) returns
-// nil/garbage for strings longer than ~40 bytes that originated from a
-// native lua_pushlstring call -- while the native C API (lua_tolstring)
-// reads the exact same memory correctly. Real effect requests are 300+
-// bytes and were being silently swallowed by Lua-side parsing this entire
-// time; Crowd Control was sending them correctly all along. Short strings
-// (under the threshold) are unaffected, which is why GameUpdate pings
-// (~40 bytes) always worked. Workaround: do ALL buffering/NUL-splitting/
-// field extraction here in C++, and only ever push short, already-extracted
-// values (a numeric id/type/duration, a short code string) into Lua --
-// never the raw long message itself.
 static std::map<SOCKET, std::string> g_recvBuffers;
 
-// Loops past occurrences whose value isn't actually numeric instead of
-// giving up on the first match -- confirmed live 2026-07-20: real effect
-// requests contain a NESTED "sourceDetails":{"type":"crowd-control-test"}
-// ahead of the real top-level "type":1, and a single-match version of this
-// found that nested string value first, saw a quote instead of a digit, and
-// gave up entirely (silently returning "type" as absent). Harmless for
-// dispatch itself (the `code` field, not `type`, gates effect handling),
-// but would matter for anything that starts relying on `type` -- e.g.
-// telling EffectStop (0x02) apart from EffectStart (0x01).
 static bool ExtractIntField(const std::string& msg, const char* key, long long& outValue) {
     std::string needle = std::string("\"") + key + "\":";
     size_t searchFrom = 0;
@@ -322,13 +269,6 @@ static bool ExtractStringField(const std::string& msg, const char* key, std::str
     return true;
 }
 
-// cc_poll_message(handle) -> drains one recv() and, if a complete
-// NUL-terminated message is buffered, extracts and returns its fields.
-// Call in a loop each frame until status is "none" or "closed" -- one
-// recv() can contain multiple back-to-back messages.
-//   "message", id(int|nil), type(int|nil), code(string|nil), duration(int|nil)
-//   "none"                                    -- nothing complete yet, socket fine
-//   "closed", error(string)                   -- connection lost
 extern "C" int l_cc_poll_message(void* L) {
     SOCKET s = (SOCKET)p_lua_tointegerx(L, 1, nullptr);
 
@@ -353,8 +293,6 @@ extern "C" int l_cc_poll_message(void* L) {
             p_lua_pushstring(L, "recv() failed");
             return 2;
         }
-        // WSAEWOULDBLOCK: no new bytes this call -- fall through anyway,
-        // a previous call may have already buffered a complete message.
     }
 
     std::string& buffer = g_recvBuffers[s];
@@ -382,7 +320,6 @@ extern "C" int l_cc_poll_message(void* L) {
     return 5;
 }
 
-// cc_close(handle) -> (none)
 extern "C" int l_cc_close(void* L) {
     SOCKET s = (SOCKET)p_lua_tointegerx(L, 1, nullptr);
     g_recvBuffers.erase(s);
@@ -390,12 +327,6 @@ extern "C" int l_cc_close(void* L) {
     return 0;
 }
 
-// cc_log(msg) -> (none)
-// Appends `msg` to kh1_crowdcontrol_native.log (the same file this DLL's own
-// connection/socket logging already goes to -- see LogDebug above). Exists
-// because ConsolePrint output isn't visible anywhere by default in this
-// modding environment, so kh1_crowdcontrol.lua's own status/diagnostic
-// messages need a real, checkable-after-the-fact destination.
 extern "C" int l_cc_log(void* L) {
     size_t len = 0;
     const char* msg = p_lua_tolstring(L, 1, &len);
@@ -417,10 +348,6 @@ static const luaL_Reg kh1_crowdcontrol_native_lib[] = {
     {nullptr, nullptr}
 };
 
-// LuaBackend (the OpenKH Lua host) embeds the Lua 5.4 runtime in its own DLL
-// rather than loading a separate "lua54.dll", and that host DLL's name varies
-// by build/game. So instead of guessing a filename, walk every module loaded
-// in this process and use whichever one actually exports the Lua C API.
 static HMODULE FindLuaModule() {
     HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, GetCurrentProcessId());
     if (snap == INVALID_HANDLE_VALUE) return nullptr;
@@ -462,10 +389,6 @@ extern "C" __declspec(dllexport) int luaopen_kh1_crowdcontrol_native(void* L) {
 
     if (!p_lua_gettop || !p_lua_tointegerx || !p_lua_tolstring || !p_lua_pushinteger || !p_lua_pushboolean ||
         !p_lua_pushstring || !p_lua_pushlstring || !p_lua_pushnil || !p_luaL_setfuncs || !p_lua_createtable) {
-        // Couldn't find a loaded module exporting the Lua C API -- bail out
-        // without touching any of them. Returning 0 (no pushed values) makes
-        // require() hand back `true` rather than crashing on a null function
-        // pointer call.
         LogDebug("luaopen_kh1_crowdcontrol_native: failed to resolve Lua API exports, aborting safely");
         return 0;
     }
@@ -481,13 +404,6 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID lpReserved) {
         char* last = strrchr(g_dllDir, '\\');
         if (last) *(last + 1) = '\0';
 
-        // Pin ourselves in memory with an extra reference we never release.
-        // LuaBackend's script-refresh feature appears to FreeLibrary() native
-        // modules it required as part of giving scripts a clean reload -- an
-        // open TCP socket handle is process state that must survive a hot
-        // reload the same way kh1_native.dll's installed hooks do (see that
-        // module's DllMain for the fuller explanation), otherwise a reload
-        // mid-session would silently orphan the Crowd Control connection.
         char selfPath[MAX_PATH];
         GetModuleFileNameA(hModule, selfPath, MAX_PATH);
         LoadLibraryA(selfPath);
