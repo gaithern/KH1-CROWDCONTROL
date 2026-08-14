@@ -15,8 +15,12 @@ local socket_handle = nil
 local connecting_handle = nil -- non-nil while a non-blocking connect is in flight (see try_connect)
 local next_reconnect_attempt = 0
 
+-- Guarded: ConsolePrint isn't defined in every LuaBackend build, and an unguarded call would
+-- abort the script at load.
 local function log(msg)
-    ccnet.cc_log("[Crowd Control] " .. msg)
+    local line = "[Crowd Control] " .. msg
+    ccnet.cc_log(line)
+    --if ConsolePrint then ConsolePrint(line) end
 end
 
 local send_response
@@ -217,7 +221,8 @@ for code, model_path in pairs(ENEMY_SPAWN_EFFECTS) do
                         model_path, tostring(ok), tostring(result))
                 end
                 log(detail)
-                send_response(request_id, ok, detail)
+                -- Spawn refusals are transient (slots, cutscene, entity budget) -- keep it queued.
+                send_response(request_id, ok and STATUS_SUCCESS or STATUS_RETRY, detail)
             end)
             return PENDING_RESPONSE
         end,
@@ -254,6 +259,9 @@ end
 -- ############### --
 
 local STATUS_SUCCESS = 0
+-- Retry is what the docs call "the normal failure response"; Failure and Unavailable both say
+-- "you probably don't want this" (Failure refunds and ends it, Unavailable kills the effect).
+local STATUS_RETRY   = 3
 local STATUS_FAILURE = 1
 
 local GAME_UPDATE_TYPE = 253
@@ -261,17 +269,17 @@ local GAME_UPDATE_TYPE = 253
 local function send_game_state(state)
     if not socket_handle then return end
     local msg = json.encode({ type = GAME_UPDATE_TYPE, state = state })
+    log("TX state -> " .. msg)
     ccnet.cc_send(socket_handle, msg .. "\0")
-    log(string.format("Sent game state: %s", state))
 end
 
 local last_reported_state = nil
 
 -- Is it safe to fire an effect right now? Returns a Crowd Control GameState + a reason.
--- `menu`/`title` follow the sibling speedrun/rando mods' convention (0 = not in one).
+-- Not loaded into a world: 0xFF is the "no world" sentinel, live-confirmed on the title screen.
 local function get_effect_readiness()
-    if ReadByte(title) ~= 0 then
-        return "menu", "the game is on the title screen"
+    if kh1.get_world() == 0xFF then
+        return "menu", "the game isn't in a world (title screen or loading)"
     end
     if ReadInt(inCutscene) ~= 0 then
         return "cutscene", "a cutscene is playing"
@@ -298,16 +306,134 @@ end
 local function send_game_state_reply(request_id, state)
     if not socket_handle then return end
     local msg = json.encode({ id = request_id, type = GAME_UPDATE_TYPE, state = state })
+    log("TX state-reply -> " .. msg)
     ccnet.cc_send(socket_handle, msg .. "\0")
 end
 
-function send_response(request_id, ok, message)
+-- EffectStatus is serialised by CamelCaseStringEnumConverter, so these go on the wire as
+-- strings, not the numbers the docs table lists.
+-- notSelectable IS the unavailable state: WarpWorld's own DisableEffects() sends exactly this,
+-- documented as "the reason the effects are unavailable, shown in viewer menus".
+local STATUS_SELECTABLE     = "selectable"
+local STATUS_NOT_SELECTABLE = "notSelectable"
+
+-- ResponseType.EffectStatus. NOT 0, which is EffectRequest -- with id=0 there's no pending
+-- request to match on, so the type is the only thing marking this as a status message.
+local RESPONSE_TYPE_EFFECT_STATUS = 0x01
+
+-- EffectUpdate takes an `ids` ARRAY (its `code` field is deprecated), so one message covers
+-- every effect sharing a status.
+local function send_effect_class(ids, status, message)
+    if not socket_handle or #ids == 0 then return end
+    local payload = json.encode({
+        id = 0, -- class messages aren't answering a request
+        type = RESPONSE_TYPE_EFFECT_STATUS,
+        ids = ids,
+        status = status,
+        message = message,
+    })
+    log("TX class -> " .. payload)
+    ccnet.cc_send(socket_handle, payload .. "\0")
+end
+
+-- spawn_has_room persists across state flips; sent_selectable is what Crowd Control was last
+-- told. Keeping them apart is what stops a cutscene wiping every per-creature verdict.
+local spawn_has_room = {}
+local sent_selectable = {}
+
+local function desired_selectable(effect_code, state)
+    if state ~= "ready" then return false end
+    if ENEMY_SPAWN_EFFECTS[effect_code] then return spawn_has_room[effect_code] == true end
+    return true
+end
+
+-- Sends only what actually changed, so a ready<->cutscene flip costs nothing for effects
+-- already in the right state.
+local function push_selectability(state)
+    local on, off = {}, {}
+    for effect_code in pairs(effect_handlers) do
+        local want = desired_selectable(effect_code, state)
+        if sent_selectable[effect_code] ~= want then
+            sent_selectable[effect_code] = want
+            local bucket = want and on or off
+            bucket[#bucket + 1] = effect_code
+        end
+    end
+    if #on == 0 and #off == 0 then return end
+    -- One update per state, matching WarpWorld's Enable/DisableEffects. No visible assert:
+    -- we never hide anything, and the reference doesn't pair the two.
+    send_effect_class(on, STATUS_SELECTABLE)
+    send_effect_class(off, STATUS_NOT_SELECTABLE, state ~= "ready"
+        and "Not possible right now -- check back in a moment."
+        or "Not enough free creature slots right now.")
+    log(string.format("Selectability for '%s': %d available, %d unavailable", state, #on, #off))
+end
+
+-- A push sent before Crowd Control finished registering the pack is dropped, and diffs alone
+-- would never re-send it. Re-assert the whole set periodically so it self-heals.
+local FULL_REFRESH_INTERVAL_SECONDS = 10
+local next_full_refresh = 0
+
+local function refresh_selectability(state)
+    local now = os.clock()
+    if now < next_full_refresh then return end
+    next_full_refresh = now + FULL_REFRESH_INTERVAL_SECONDS
+    sent_selectable = {}
+    push_selectability(state)
+end
+
+-- Slot needs differ per creature (Invisible 4, Shadow 1). One probe at a time: can_spawn_enemy
+-- walks live entities per call, so all 34 at once would be costly.
+local SPAWN_PROBE_INTERVAL_SECONDS = 0.1
+local next_spawn_probe = 0
+local spawn_probe_list = {}
+local spawn_probe_index = 0
+for effect_code, model_path in pairs(ENEMY_SPAWN_EFFECTS) do
+    spawn_probe_list[#spawn_probe_list + 1] = { code = effect_code, model = model_path }
+end
+
+local function update_one_spawn_effect_availability(state)
+    -- Only probe while ready: can_spawn_enemy's own cutscene/Gummi gates would otherwise
+    -- report every creature as roomless and wipe the verdicts.
+    if state ~= "ready" or #spawn_probe_list == 0 then return end
+    local now = os.clock()
+    if now < next_spawn_probe then return end
+    next_spawn_probe = now + SPAWN_PROBE_INTERVAL_SECONDS
+
+    spawn_probe_index = (spawn_probe_index % #spawn_probe_list) + 1
+    local entry = spawn_probe_list[spawn_probe_index]
+    local verdict, code = kh1.can_spawn_enemy(entry.model)
+    local has_room = (verdict == "ready")
+    if spawn_has_room[entry.code] == has_room then return end
+    spawn_has_room[entry.code] = has_room
+    log(string.format("%s has room: %s (%s)", entry.code, tostring(has_room), tostring(code)))
+    push_selectability(state)
+end
+
+-- The state flaps across transitions (ready<->cutscene several times a second) and every change
+-- re-marks 90 effects, so only report once it has held still.
+local STATE_DEBOUNCE_SECONDS = 0.5
+local candidate_state, candidate_state_since = nil, 0
+
+local function settled_game_state()
+    local state = current_game_state()
+    if state ~= candidate_state then
+        candidate_state, candidate_state_since = state, os.clock()
+        return nil
+    end
+    if os.clock() - candidate_state_since < STATE_DEBOUNCE_SECONDS then return nil end
+    return state
+end
+
+function send_response(request_id, status, message)
     if not socket_handle then return end
-    local payload = { id = request_id, type = 0, status = ok and STATUS_SUCCESS or STATUS_FAILURE }
+    local payload = { id = request_id, type = 0, status = status }
     if message then
         payload.message = message
     end
-    ccnet.cc_send(socket_handle, json.encode(payload) .. "\0")
+    local encoded = json.encode(payload)
+    log("TX response -> " .. encoded)
+    ccnet.cc_send(socket_handle, encoded .. "\0")
 end
 
 local function handle_request(id, msg_type, code, duration)
@@ -325,10 +451,11 @@ local function handle_request(id, msg_type, code, duration)
 
     local state, reason = get_effect_readiness()
     if state ~= "ready" then
-        local message = string.format("Ignored '%s' -- %s; try again afterwards",
-                                      tostring(code), reason or state)
-        log(message)
-        send_response(id, false, message)
+        local message = string.format("Not right now -- %s. Queued; it'll fire shortly.",
+                                      reason or state)
+        log(string.format("Deferred '%s': %s", tostring(code), message))
+        -- Retry, not Failure: the viewer keeps their coins and Crowd Control re-sends.
+        send_response(id, STATUS_RETRY, message)
         return
     end
 
@@ -356,7 +483,7 @@ local function handle_request(id, msg_type, code, duration)
         ok = call_ok and apply_ok and true or false
     end
 
-    send_response(id, ok, message)
+    send_response(id, ok and STATUS_SUCCESS or STATUS_FAILURE, message)
 end
 
 -- ############### --
@@ -374,6 +501,11 @@ function update_crowdcontrol()
             log(string.format("Connected to %s:%d", CC_HOST, CC_PORT))
             last_reported_state = current_game_state()
             send_game_state(last_reported_state)
+            -- Crowd Control doesn't remember what a previous session reported. The re-assert is
+            -- delayed a few seconds because this first push lands before the pack is registered.
+            sent_selectable = {}
+            next_full_refresh = os.clock() + 3
+            push_selectability(last_reported_state)
         elseif status == "failed" then
             ccnet.cc_close(connecting_handle)
             connecting_handle = nil
@@ -391,10 +523,15 @@ function update_crowdcontrol()
         return
     end
 
-    local state = current_game_state()
-    if state ~= last_reported_state then
-        last_reported_state = state
-        send_game_state(state)
+    local state = settled_game_state()
+    if state then
+        if state ~= last_reported_state then
+            last_reported_state = state
+            send_game_state(state)
+        end
+        push_selectability(state)
+        refresh_selectability(state)
+        update_one_spawn_effect_availability(state)
     end
 
     while true do
