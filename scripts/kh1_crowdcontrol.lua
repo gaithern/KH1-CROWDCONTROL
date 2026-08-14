@@ -15,12 +15,8 @@ local socket_handle = nil
 local connecting_handle = nil -- non-nil while a non-blocking connect is in flight (see try_connect)
 local next_reconnect_attempt = 0
 
--- Guarded: ConsolePrint isn't defined in every LuaBackend build, and an unguarded call would
--- abort the script at load.
 local function log(msg)
-    local line = "[Crowd Control] " .. msg
-    ccnet.cc_log(line)
-    --if ConsolePrint then ConsolePrint(line) end
+    ccnet.cc_log("[Crowd Control] " .. msg)
 end
 
 local send_response
@@ -269,8 +265,8 @@ local GAME_UPDATE_TYPE = 253
 local function send_game_state(state)
     if not socket_handle then return end
     local msg = json.encode({ type = GAME_UPDATE_TYPE, state = state })
-    log("TX state -> " .. msg)
     ccnet.cc_send(socket_handle, msg .. "\0")
+    log(string.format("Sent game state: %s", state))
 end
 
 local last_reported_state = nil
@@ -306,7 +302,6 @@ end
 local function send_game_state_reply(request_id, state)
     if not socket_handle then return end
     local msg = json.encode({ id = request_id, type = GAME_UPDATE_TYPE, state = state })
-    log("TX state-reply -> " .. msg)
     ccnet.cc_send(socket_handle, msg .. "\0")
 end
 
@@ -328,7 +323,6 @@ local function send_effect_class(ids, status, message)
         status = status,
         message = message,
     })
-    log("TX class -> " .. payload)
     ccnet.cc_send(socket_handle, payload .. "\0")
 end
 
@@ -378,7 +372,7 @@ local function refresh_selectability(state)
     push_selectability(state)
 end
 
--- Slot needs differ per creature (Invisible 4, Shadow 1). One probe at a time: can_spawn_enemy
+-- Slot needs differ per creature (Black Fungi 13, Screwdiver 3). One probe at a time: can_spawn_enemy
 -- walks live entities per call, so all 34 at once would be costly.
 local SPAWN_PROBE_INTERVAL_SECONDS = 0.1
 local next_spawn_probe = 0
@@ -427,9 +421,7 @@ function send_response(request_id, status, message)
     if message then
         payload.message = message
     end
-    local encoded = json.encode(payload)
-    log("TX response -> " .. encoded)
-    ccnet.cc_send(socket_handle, encoded .. "\0")
+    ccnet.cc_send(socket_handle, json.encode(payload) .. "\0")
 end
 
 local function handle_request(id, msg_type, code, duration)
