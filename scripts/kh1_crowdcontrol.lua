@@ -316,6 +316,19 @@ end
 -- documented as "the reason the effects are unavailable, shown in viewer menus".
 local STATUS_SELECTABLE     = "selectable"
 local STATUS_NOT_SELECTABLE = "notSelectable"
+local STATUS_VISIBLE        = "visible"
+local STATUS_NOT_VISIBLE    = "notVisible"
+
+-- TEMPORARY SDK COLOUR TEST. Flip to false to restore normal selectable/notSelectable behaviour.
+-- The SDK paints each effect from the last status it received: notSelectable (MenuUnavailable)
+-- draws red, notVisible (MenuHidden) draws grey. With this on we send the visibility pair
+-- instead, so the "unavailable" set should turn grey -- which confirms red already meant
+-- unavailable and nothing was ever hidden. Do NOT ship with this enabled: it really does hide
+-- the effects from viewers.
+local HIDE_INSTEAD_OF_DISABLE = true
+
+local STATUS_ON  = HIDE_INSTEAD_OF_DISABLE and STATUS_VISIBLE     or STATUS_SELECTABLE
+local STATUS_OFF = HIDE_INSTEAD_OF_DISABLE and STATUS_NOT_VISIBLE or STATUS_NOT_SELECTABLE
 
 -- ResponseType.EffectStatus. NOT 0, which is EffectRequest -- with id=0 there's no pending
 -- request to match on, so the type is the only thing marking this as a status message.
@@ -360,13 +373,13 @@ local function push_selectability(state)
         end
     end
     if #on == 0 and #off == 0 then return end
-    -- One update per state, matching WarpWorld's Enable/DisableEffects. No visible assert:
-    -- we never hide anything, and the reference doesn't pair the two.
-    send_effect_class(on, STATUS_SELECTABLE)
-    send_effect_class(off, STATUS_NOT_SELECTABLE, state ~= "ready"
+    -- One update per state, matching WarpWorld's Enable/DisableEffects. Only one axis is ever
+    -- asserted (see HIDE_INSTEAD_OF_DISABLE); the reference doesn't pair the two either.
+    send_effect_class(on, STATUS_ON)
+    send_effect_class(off, STATUS_OFF, state ~= "ready"
         and "Not possible right now -- check back in a moment."
         or "Not enough free creature slots right now.")
-    log(string.format("Selectability for '%s': %d available, %d unavailable", state, #on, #off))
+    log(string.format("Selectability for '%s': %d %s, %d %s", state, #on, STATUS_ON, #off, STATUS_OFF))
 end
 
 -- A push sent before Crowd Control finished registering the pack is dropped, and diffs alone
