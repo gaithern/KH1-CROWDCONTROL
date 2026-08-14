@@ -1,102 +1,22 @@
 # KH1 Crowd Control
 
-Lets Twitch [Crowd Control](https://crowdcontrol.live/) redemptions trigger real effects in Kingdom Hearts Final Mix (PC): spawn an item or Heartless enemy near Sora, pop a custom message on screen, drop Sora's combo limit to 1, or trigger a KO/Heartless Angel.
+Lets Twitch [Crowd Control](https://crowdcontrol.live/) redemptions trigger real effects in Kingdom Hearts Final Mix (PC) — spawn items and Heartless near Sora, pop messages on screen, grant abilities, cripple combos, or KO him outright.
 
-This mod is a thin connector: it opens a TCP connection to the Crowd Control app and dispatches whatever effects it receives into KH1-LUA-LIBRARY functions. It does not work standalone — **KH1-LUA-LIBRARY must be installed alongside it**.
+The mod is a thin connector: it opens a TCP connection to the Crowd Control app and dispatches the effects it receives into [KH1-LUA-LIBRARY](../KH1-LUA-LIBRARY), which does the actual game-memory work. It does not run standalone.
 
-> **Status:** this repo briefly went down two wrong paths before landing here — first a JSON pack targeting the SimpleTCP connector (wrong file format), then a full PubSub/WebSocket rewrite (wrong connector entirely, based on a docs page that turned out not to apply). The Crowd Control team confirmed directly on Discord: *"I'd suggest a Simple TCP C# pack approach rather than a full blown socket implementation."* `pack/KH1CrowdControlPack.cs` now **loads clean in the real Crowd Control SDK** (no compiler errors, no QA warnings) and at least one effect (`message`) has been **confirmed live end-to-end** through the SDK's Test Effects tool — both confirmed 2026-07-13. Most of the effect list is still untested (see the effects status table below and the `TODO(verify)` comments remaining in `scripts/kh1_crowdcontrol.lua`).
+## Installation
 
-## Prerequisites
+- Kingdom Hearts Final Mix (PC, Steam or EGS) with [OpenKH](https://openkh.dev/) (LuaBackend and Panacea).
+- [gaithern//KH1-CROWDCONTROL](https://github.com/gaithern/KH1-CROWDCONTROL) installed in OpenKH.
+- [gaithern/KH1-LUA-LIBRARY](https://github.com/gaithern/KH1-LUA-LIBRARY) installed in OpenKH.
+- The [Crowd Control app](https://crowdcontrol.live/) running on the same machine.
 
-- Kingdom Hearts Final Mix (PC, Steam or EGS) with [OpenKH Panacea](https://openkh.dev/) and **LuaBackend** installed and working.
-- The [KH1-LUA-LIBRARY](../KH1-LUA-LIBRARY) mod installed (provides `kh1_lua_library.lua`, `json.lua`, `VersionCheck.lua`, `kh1_native.dll`).
-- The [Crowd Control desktop app](https://crowdcontrol.live/), running on the same machine as the game.
-- The [Crowd Control SDK](https://developer.crowdcontrol.live/sdk/#download-the-sdk) ([GitHub releases](https://github.com/WarpWorld/CrowdControl.SDK/releases)) — a separate downloadable installer from the main streaming app. This is what actually loads `pack/KH1CrowdControlPack.cs` via its "Load Pack Source" feature for local testing, and its compiler errors are the fastest way to correct anything guessed-wrong in that file (see its own header comment for what's unconfirmed).
-- Visual Studio 2022 with the "Desktop development with C++" workload — only needed if you're building the native DLL yourself rather than using a prebuilt one.
+## Effects
 
-## 1. Build the native DLL
+Around 90 effects, all one-shot — item spawns, Heartless spawns, preset on-screen messages, ability grants, a combo-limit crush, Heartless Angel, and an instant KO. The full list lives in the `effect_handlers` table in the Lua script and mirrors the pack definition.
 
-`scripts/io_packages/kh1_crowdcontrol_native.dll` is a small WinSock bridge (Lua has no socket library on its own). Build it with:
-
-```powershell
-native/KH1CrowdControlNative/build.ps1
-```
-
-This compiles Release|x64 and drops the DLL directly into `scripts/io_packages/kh1_crowdcontrol_native.dll`, so the repo is immediately ready to install after a build. (The DLL is committed to the repo too, so most users won't need to rebuild it — only do this if you've changed `dllmain.cpp`.)
-
-## 2. Install the mod
-
-Same as any other OpenKH Lua mod:
-
-1. Copy this repo's `scripts/` folder (both `kh1_crowdcontrol.lua` and `io_packages/kh1_crowdcontrol_native.dll`) into your KH1 mods folder, alongside KH1-LUA-LIBRARY's own files — or install both mods through the OpenKH Mod Manager if you've packaged them there.
-2. Confirm both mods' files end up merged into the *same* `scripts/` tree in the game's mod-load folder. `require("kh1_lua_library")` and `require("kh1_crowdcontrol_native")` both need to resolve at runtime; OpenKH's Lua loader searches across all installed mods' `scripts/io_packages/` for this.
-
-`kh1_crowdcontrol.lua` must stay directly under `scripts/` (not `scripts/io_packages/`) — that's what makes OpenKH auto-load it and call its `_OnFrame` every frame. See the comment at the top of that file if you're restructuring anything.
-
-## 3. Point it at Crowd Control
-
-`scripts/kh1_crowdcontrol.lua` connects out to the Crowd Control app as a TCP client (Crowd Control hosts the server side — this is its ["SimpleTCP"](https://developer.crowdcontrol.live/sdk/simpletcp/index.html) connector, confirmed by the Crowd Control team as the right approach for this kind of memory-editing integration):
-
-```lua
-local CC_HOST = "127.0.0.1"
-local CC_PORT = 43384
-```
-
-- `CC_PORT` must match whatever port you configure for this pack's SimpleTCP connector.
-- The mod retries the connection every 5 seconds if the Crowd Control app isn't up yet, so load order between the game and the app doesn't matter. The connect itself is non-blocking (`cc_connect` starts it, `cc_connect_status` is polled each frame until it resolves) — an earlier blocking version of this was observed causing multi-second game freezes on every reconnect attempt whenever the SDK app wasn't yet listening on the port.
-- Crowd Control sends non-effect protocol messages on this same connection (`type=253`/`0xFD`, no `code` field, roughly every few seconds) — this is the **GameUpdate** message type from Crowd Control's SimpleJSON structure reference, not a generic ping. `handle_request` ignores these outright rather than sending a bogus failure response — an earlier version sent one for every such message, which likely contributed to the connection getting aborted (`WSAECONNABORTED`) shortly after a burst of them.
-- **The mod must itself SEND a GameUpdate message reporting `state: "ready"` right after connecting** (`send_game_state("ready")`, called once the socket reaches "connected") — confirmed critical 2026-07-13: per that same structure reference, `"ready"` is *the only* game state where Crowd Control will actually dispatch effects. Without ever sending this, the raw TCP connection worked fine (bytes flowing both ways, no errors) but the SDK reported the connector as unable to reach "the game" and refused to fire anything — a connected socket alone isn't enough.
-- The mod reports **real game states**, re-sending whenever the state changes. `get_effect_readiness()` returns one of Crowd Control's own `GameState` values — `ready`, `cutscene`, `menu` (title screen or an open menu), `wrongMode` (Gummi ship), `badPlayerState` (Sora KO'd) — plus a human-readable reason used in the effect-response message. Anything other than `ready` stops Crowd Control dispatching effects at all, which is the cheapest way for a viewer not to spend coins on something that couldn't have worked. This function lives here rather than in KH1-LUA-LIBRARY precisely because those strings are Crowd Control's vocabulary, not KH1's — the library stays connector-agnostic. An earlier version sent `"notready"`, which is **not** in the structure reference's state list and was being ignored, so effects were still dispatched into cutscenes.
-
-- Effects that can't currently be used are marked **unavailable** (greyed out, still listed), never **hidden**. Getting this right took a lot of wrong turns, so the details below come from the actual [ConnectorLib.JSON](https://github.com/WarpWorld/ConnectorLib.JSON) source and WarpWorld's own [BepinEx example plugin](https://github.com/WarpWorld/BepinEx-Example-Plugin) — **the docs tables are misleading on several points**. The message this mod sends is exactly what that plugin's `DisableEffects()` sends:
-
-  ```json
-  {"id":0,"type":1,"ids":["spawn_black_fungi"],"status":"notSelectable",
-   "message":"Not enough free creature slots right now."}
-  ```
-
-  - The class is **`EffectUpdate`**, not `EffectResponse` — `EffectResponse` has no effect-identity field beyond the request `id`, so a `code` attached to one is not part of its schema.
-  - Identity is **`ids`, a string array** (`EffectUpdate.code` is deprecated in the source). Being an array means one message covers every effect sharing a status, so `push_selectability` sends at most two messages rather than one per effect.
-  - `type` is `ResponseType.EffectStatus` = **`0x01`**. Not `0x00` — that's `EffectRequest`, the game *asking for* an effect. With `id: 0` there's no pending request to match on, so `type` is the only thing identifying the message.
-  - `status` is serialised by `CamelCaseStringEnumConverter`, so it goes on the wire as a **camelCase string** (`"selectable"` / `"notSelectable"`) — not the `0x82`/`0x83` numbers the docs' enum table lists. (Integers are also accepted on read, which is why the numeric instance statuses in `send_response` work.)
-  - **`notSelectable` IS the unavailable state.** WarpWorld's `DisableEffects()` sends exactly it, and documents its `message` parameter as *"the reason the effects are unavailable, shown in viewer menus"*. `NotVisible` is the *hidden* one. Do **not** use `Unavailable` (`0x02`) here — it's an *instance* status answering a single request, so with `id: 0` it has nothing to apply to and is silently dropped.
-  - Send **one** update per state. The reference never pairs `Visible` with `NotSelectable`; we only ever disable, never hide, so re-asserting `visible` is unnecessary.
-  - **Re-assert periodically.** `push_selectability` sends only diffs, and a push made immediately on connect lands *before* Crowd Control has registered the pack, so it's dropped — and diffing means it's never re-sent. `refresh_selectability` clears the sent-state and re-pushes every 10s (first pass 3s after connect) so a dropped update self-heals. Without this, whether the menu updated at all depended on whether a game-state change happened to force a later push.
-
-- **Blocked effects answer `Retry` (`0x03`), not `Failure`.** From `EffectStatus.cs`'s own doc comments: `Retry` is *"the effect cannot be triggered right now, try again in a few seconds — **this is the 'normal' failure response**"*, while `Failure` (*"viewer(s) will be refunded"*) and `Unavailable` (*"no longer available for the remainder of the game"*) are both annotated ***"you probably don't want this"***. So anything transient — a cutscene, the Gummi ship, no free creature slots, the room's concurrent-enemy budget — returns `Retry` and the redemption stays queued; only a genuine handler error returns `Failure`. Note the docs page marks `Retry` "INTERNAL USE ONLY" while the source calls it the normal response; the source wins here, but that's the first thing to re-check if retries misbehave.
-
-`pack/KH1CrowdControlPack.cs` is the game pack definition (effect list + connector config) for the Crowd Control side — a C# source file loaded into the Crowd Control **SDK** app (see Prerequisites) via its "Load Pack Source" pack editor, not JSON. It **loads clean** (no compiler errors, no QA warnings) as of 2026-07-13 — see the file's own header comment for exactly what that confirmed (the `ConnectorLib.SimpleTCP` namespace for `SimpleTCPServerConnector`, `Game(...)`'s real 4-argument signature, `Effects` needing to be typed `EffectList`) versus what's still untested (an actual live effect firing through the game). Once a live redemption is confirmed working, public listing requires reaching out on Crowd Control's Discord per their [SDK overview](https://developer.crowdcontrol.live/sdk/).
-
-## 4. Effects currently wired up
-
-See the `effect_handlers` table in `scripts/kh1_crowdcontrol.lua` (90 effects total) and the matching entries in `pack/KH1CrowdControlPack.cs`.
-
-**Every effect is one-shot** — there is no timed-effect / auto-revert machinery in the mod at all. The two kinds of effect that would otherwise have wanted a timer (`no_combos` and the `ability_*` grants) write flags the game itself recomputes on the next menu or room transition, so the game reverts them for us. Crowd Control still sends a `duration` (ms) on the request and the mod still logs it, but nothing acts on it; the pack definitions declare no `Duration`, so Crowd Control shows these as instant effects rather than running a timer bar.
-
-| Effect code(s) | Does what | Status |
-|---|---|---|
-| `give_potion`, `give_hi_potion`, `give_ether`, `give_elixir`, `give_mega_potion`, `give_mega_ether`, `give_megalixir`, `give_tent`, `give_camping_set`, `give_cottage`, `give_power_up`, `give_defense_up`, `give_ap_up` (13 effects) | Spawns a real, collectible pickup near Sora via `kh1.spawn_prize(item_id)` | Untested end-to-end — `item_id`s are cross-confirmed against two *other* mechanisms (KH-1FM-AP-LUA's inventory writer, KH1-RANDOMIZER's gift-table encoding), not against `fnc_spawn_prize` itself; limited to simple non-progression items until one is confirmed live |
-| `message_gg`, `message_nice`, `message_oops`, `message_uhoh`, `message_nooo`, `message_yay`, `message_hello`, `message_whoops`, `message_sotrue`, `message_skillissue`, `message_chaos`, `message_goodluck`, `message_badluck`, `message_tryagain`, `message_wtake`, `message_ltake` (16 effects) | Shows a fixed preset message via `kh1.show_custom_item_popup` — the map-prize pickup popup, repurposed to show custom text instead of an item name | **Confirmed live** (the underlying popup mechanism fired successfully in the SDK's Test Effects tool), but the retrigger-cooldown fix below hasn't been re-tested yet. History: `open_text_box` didn't work → switched to a `Parameters`-based preset picker (Crowd Control confirmed on Discord there's **no free-text input at all** on this connector) → that worked once but couldn't be retriggered for ~60s regardless of an explicit `SessionCooldown`, live-tested against `give_ap_up` (no `Parameters`) retriggering instantly — pointed at `Parameters`-based effects specifically having some undocumented extra cooldown on Crowd Control's side (not this repo's code, not the game — ruled out via `KH1-LUA-LIBRARY-DEBUG` retriggering the same underlying call instantly) → reworked into 16 discrete effects (no `Parameters` at all), matching the `give_*` pattern that's confirmed to retrigger cleanly. |
-| `no_combos` | Sets ground+air combo limit to 1 via `kh1.set_ground_combo_length_limit(1)` / `kh1.set_air_combo_length_limit(1)`; the game restores the real limits itself on the next menu or room transition | Untested end-to-end |
-| `ability_vortex`, `ability_aerial_sweep`, `ability_counterattack`, `ability_blitz`, `ability_guard`, `ability_dodge_roll`, `ability_cheer`, `ability_slapshot`, `ability_sliding_dash`, `ability_hurricane_blast`, `ability_ripple_drive`, `ability_stun_impact`, `ability_gravity_break`, `ability_zantetsuken`, `ability_sonic_blade`, `ability_ars_arcanum`, `ability_strike_raid`, `ability_ragnarok`, `ability_trinity_limit`, `ability_mp_haste`, `ability_mp_rage`, `ability_second_chance`, `ability_berserk`, `ability_leaf_bracer` (24 effects) | Force-enables one ability via `kh1.enable_ability(name)` even if Sora doesn't have it or hasn't equipped it; same one-shot deal as `no_combos` (the game recomputes the flag from Sora's actual equipped abilities on the next menu or room transition). Covers exactly the 24 names in `enable_ability`'s own table in KH1-LUA-LIBRARY — an unrecognised name is a silent no-op there, so the keys in `ABILITY_EFFECTS` have to stay in sync with it | Untested end-to-end — how long each flag actually survives before the game recomputes it hasn't been measured live, and `enable_ability` only ever sets the bit (there's no matching disable) |
-| `ko_sora` | Instantly triggers Sora's real in-game KO sequence via `kh1.ko_sora()` (cold-starts the real KO event script -- death animation, input lock, Game Over) | Untested end-to-end -- `kh1.ko_sora` itself is live-verified per its own doc comment in KH1-LUA-LIBRARY |
-| `heartless_angel_sora` | Drops Sora to 1 HP via `kh1.heartless_angel_sora()`, same as Sephiroth's Heartless Angel move | Untested end-to-end |
-| `spawn_shadow`, `spawn_soldier`, `spawn_powerwild`, `spawn_sea_neon`, `spawn_red_nocturne`, `spawn_blue_rhapsody`, `spawn_yellow_opera`, `spawn_green_requiem`, `spawn_air_soldier`, `spawn_bouncywild`, `spawn_large_body`, `spawn_fat_bandit`, `spawn_sheltering_zone`, `spawn_bandit`, `spawn_pirate`, `spawn_wight_knight`, `spawn_air_pirate`, `spawn_gargoyle`, `spawn_search_ghost`, `spawn_aquatank`, `spawn_screwdiver`, `spawn_darkball`, `spawn_bitsniper`, `spawn_wizard`, `spawn_invisible`, `spawn_wyvern`, `spawn_angel_star`, `spawn_defender`, `spawn_jet_balloon`, `spawn_stealth_sneak`, `spawn_missile_diver`, `spawn_sniperwild`, `spawn_pink_agaricus`, `spawn_black_fungi` (34 effects) | Spawns a real Heartless near Sora via `kh1.spawn_enemy(model_path, motion_path, ...)` (queued, non-blocking — driven every frame by `kh1.update_spawn_enemy()`), with `motion_path` looked up per-model from KH1-LUA-LIBRARY's `kh1_creature_data.lua` rather than derived from the model filename (some Halloween Town reskins reuse a different base creature's `.mset`) | Untested end-to-end — covers 40 of the 50 enemies present in `kh1_creature_data.lua`'s offline-extracted table; deliberately excludes Battleship, Neoshadow, White Mushroom, Halloween Town White Mushroom, Black Ballade, Halloween Town White Mushroom 2, Halloween Town Search Ghost 2, Halloween Town Rare Truffles, and Grand Ghost (none of which are in that table, so `spawn_enemy`'s charId/weight/template would default to 0/0/nil for them unless the player already visited that creature's native room live this session), plus the non-Halloween-Town Rare Truffles and all six Halloween Town reskins (present in the table, but left out by request) |
-
-`spawn_prize`'s own doc comment separately warns against chaining the game's claim/display sequence (`fnc_update_widget_queue`, EVDL 0x170/0x16F) after it — that pair's second argument is actually a pop-in-animation duration, not an item id, and feeding it one there corrupts the pickup icon's scale animation; `spawn_prize` deliberately never calls that pair, so this doesn't affect the `give_*` effects above, but don't add code that does call it with an item_id.
-
-Message text comes straight from the Crowd Control redemption with no filtering — moderate at the Crowd Control-effect level (per-effect cooldowns/blocklists in the app) if that matters for your stream.
-
-### Deliberately not wired
-
-See the comment block above `-- Deliberately NOT wired` in `scripts/kh1_crowdcontrol.lua` for the full reasoning per function. Short version: `grant_sora_ability`/`grant_shared_ability`/`enable_ability` (no ability-granting effect category wired up), `set_stock_at_index`/`set_gummi_qty_at_index` (no known index→item mapping), `set_sora_walk_speed`/`set_sora_run_speed` (no getter, no documented vanilla baseline to revert to), `set_spell_cost`/`set_spell_effectiveness` (magic effects removed; no getter for cost either way), `set_attack_animation_data`/`set_command_data` (undocumented raw-array write shapes — highest guessed-risk functions in the library), `show_prompt` (redundant with the `message_*` preset effects), `make_sora_actionable` (a debug/unstick utility, not really a chaos effect), `play_se2` (sound effects removed), `force_scan`/`force_combo_master`/`allow_summon_anywhere`/`allow_midair_dodge_roll_guard`/`allow_air_items` (toggles removed), `set_animation_speed` (speed effects removed), `multiply_summon_time` (summon effects removed).
+The mod reports real game state (cutscene, menu, Gummi ship, KO'd) back to Crowd Control, so effects are greyed out or queued for retry instead of firing into situations where they'd be wasted.
 
 ## Troubleshooting
 
-Both the game process and this mod log to files next to wherever the DLLs are loaded from:
-
-- `kh1_crowdcontrol_native.log` — connection attempts, socket errors, **and this mod's own status/diagnostic messages** (which effect fired, request payloads, handler errors — see `log()` in `kh1_crowdcontrol.lua`). Confirmed live 2026-07-13: `ConsolePrint` output isn't visible anywhere by default in this modding environment, so this mod routes everything through `ccnet.cc_log()` into this same file instead — don't rely on `ConsolePrint` for debugging.
-- `kh1_native.log` (from KH1-LUA-LIBRARY) — the underlying game-function calls (`play_se2`, `spawn_prize`, text box hooks).
-- **The Crowd Control app itself** — every effect response now carries the SimpleTCP `EffectResponse.message` field (optional secondary text, per Crowd Control's structure reference) alongside its status, so a failure's *reason* reaches the Crowd Control side instead of only the log file above. Enemy spawns go further: they **defer** their response rather than answering the instant the request is queued, so the status Crowd Control sees is `kh1.spawn_enemy`'s *real* asynchronous outcome — `spawn_enemy("xa_ex_2020.mdls") = true / entity=0x…`, or the reason it failed (asset-load timeout, cutscene, native error) — instead of an unconditional Success. Two caveats, both untested live: that structure reference only promises `message` is *displayed* for errors, so a successful spawn's text may not render in the app even though its Success status does; and a deferred reply can take up to `kh1.spawn_enemy`'s ~10s asset-load deadline to arrive, which is longer than Crowd Control's (undocumented) response window may allow.
-
-If effects never fire, check `kh1_crowdcontrol_native.log` first for whether the TCP connection to the Crowd Control app ever succeeded, then for a `Received request: ...` line showing whether Crowd Control's request actually reached this mod and what `code` it carried.
+Logs are written next to the DLLs: `kh1_crowdcontrol_native.log` for this mod's connection and effect activity, `kh1_native.log` for the underlying game-function calls from KH1-LUA-LIBRARY. If nothing fires, check the first for whether the TCP connection succeeded and whether requests are arriving.
