@@ -1,7 +1,9 @@
 title: KH1 Crowd Control
 originalAuthor: Gicu
 description: >-
-  Lets Twitch Crowd Control redemptions trigger real KH1 effects.
+  Lets Twitch Crowd Control redemptions trigger real KH1 effects (sounds,
+  items, on-screen messages). Requires the KH1 Lua Library mod to also be
+  installed.
 assets:
 - name: scripts/io_packages/kh1_crowdcontrol_native.dll
   method: copy
