@@ -415,6 +415,15 @@ local function settled_game_state()
     return state
 end
 
+local EFFECT_READY_SETTLE_SECONDS = 2.0
+
+local function effects_ready_now()
+    return candidate_state == "ready"
+        and (os.clock() - candidate_state_since) >= EFFECT_READY_SETTLE_SECONDS
+end
+
+local spawn_dispatched_this_frame = false
+
 function send_response(request_id, status, message)
     if not socket_handle then return end
     local payload = { id = request_id, type = 0, status = status }
@@ -445,6 +454,23 @@ local function handle_request(id, msg_type, code, duration)
         -- Retry, not Failure: the viewer keeps their coins and Crowd Control re-sends.
         send_response(id, STATUS_RETRY, message)
         return
+    end
+
+    if not effects_ready_now() then
+        local message = "Not right now -- the game is mid-transition. Queued; it'll fire shortly."
+        log(string.format("Deferred '%s': ready but not settled", tostring(code)))
+        send_response(id, STATUS_RETRY, message)
+        return
+    end
+
+    if ENEMY_SPAWN_EFFECTS[code] then
+        if spawn_dispatched_this_frame then
+            local message = "Another spawn is in flight. Queued; it'll fire shortly."
+            log(string.format("Deferred '%s': spawn already dispatched this frame", tostring(code)))
+            send_response(id, STATUS_RETRY, message)
+            return
+        end
+        spawn_dispatched_this_frame = true
     end
 
     local handler = effect_handlers[code]
@@ -480,6 +506,7 @@ end
 
 function update_crowdcontrol()
     kh1.update_spawn_enemy()
+    spawn_dispatched_this_frame = false
 
     if connecting_handle then
         local status = ccnet.cc_connect_status(connecting_handle)
