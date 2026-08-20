@@ -3,7 +3,6 @@
 require("VersionCheck")
 
 local kh1 = require("kh1_lua_library")
-local kh1_creature_data = require("kh1_lua_library.creature_data")
 local json = require("json")
 local ccnet = require("kh1_crowdcontrol_native")
 
@@ -160,6 +159,21 @@ end
 -- ####################### --
 -- # Enemy spawns          # --
 -- ####################### --
+
+-- kh1.spawn_enemy is now a polled primitive: (model, x, y, z) -> ok, result_or_reason. We own
+-- the retry loop it used to run internally (the old kh1.update_spawn_enemy). One attempt per
+-- frame preserves the crash-containment invariant (never trigger multiple loads in a frame).
+-- update_enemy_spawns (the driver) is defined near the frame pump, where STATUS_* are in scope.
+local pending_enemy_spawns = {}
+local ENEMY_SPAWN_TIMEOUT_SECONDS = 10.0
+
+local function enqueue_enemy_spawn(request_id, model_path, x, y, z)
+    pending_enemy_spawns[#pending_enemy_spawns + 1] = {
+        id = request_id, model = model_path, x = x, y = y, z = z,
+        deadline = os.clock() + ENEMY_SPAWN_TIMEOUT_SECONDS,
+    }
+end
+
 local ENEMY_SPAWN_EFFECTS = {
     spawn_shadow = "xa_ex_2020.mdls",
     spawn_soldier = "xa_ex_2010.mdls",
@@ -197,8 +211,6 @@ local ENEMY_SPAWN_EFFECTS = {
     spawn_black_fungi = "xa_ex_2380.mdls",
 }
 for code, model_path in pairs(ENEMY_SPAWN_EFFECTS) do
-    local known = kh1_creature_data[model_path]
-    local motion_path = known and known.motionPath
     effect_handlers[code] = {
 
         apply = function(request_id)
@@ -207,19 +219,7 @@ for code, model_path in pairs(ENEMY_SPAWN_EFFECTS) do
             local radius = 250 + math.random() * 150
             local x = pos["X"] + math.cos(angle) * radius
             local z = pos["Z"] + math.sin(angle) * radius
-            kh1.spawn_enemy(model_path, motion_path, x, pos["Y"], z, function(ok, result)
-                local detail
-                if ok and type(result) == "number" then
-                    detail = string.format("spawn_enemy(\"%s\") = %s / entity=0x%X",
-                        model_path, tostring(ok), math.floor(result))
-                else
-                    detail = string.format("spawn_enemy(\"%s\") = %s / %s",
-                        model_path, tostring(ok), tostring(result))
-                end
-                log(detail)
-                -- Spawn refusals are transient (slots, cutscene, entity budget) -- keep it queued.
-                send_response(request_id, ok and STATUS_SUCCESS or STATUS_RETRY, detail)
-            end)
+            enqueue_enemy_spawn(request_id, model_path, x, pos["Y"], z)
             return PENDING_RESPONSE
         end,
     }
@@ -504,8 +504,32 @@ end
 -- # Frame pump    # --
 -- ############### --
 
+local function update_enemy_spawns()
+    local req = pending_enemy_spawns[1]
+    if not req then return end
+    local ok, result = kh1.spawn_enemy(req.model, req.x, req.y, req.z)
+    if ok then
+        table.remove(pending_enemy_spawns, 1)
+        local detail = string.format("spawn_enemy(\"%s\") entity=0x%X", req.model, math.floor(result))
+        log(detail)
+        send_response(req.id, STATUS_SUCCESS, detail)
+    elseif result == "loading" then
+        if os.clock() >= req.deadline then
+            table.remove(pending_enemy_spawns, 1)
+            local detail = string.format("spawn_enemy(\"%s\") timed out loading", req.model)
+            log(detail)
+            send_response(req.id, STATUS_RETRY, detail)
+        end
+    else
+        table.remove(pending_enemy_spawns, 1)
+        local detail = string.format("spawn_enemy(\"%s\") = %s", req.model, tostring(result))
+        log(detail)
+        send_response(req.id, STATUS_RETRY, detail)
+    end
+end
+
 function update_crowdcontrol()
-    kh1.update_spawn_enemy()
+    update_enemy_spawns()
     spawn_dispatched_this_frame = false
 
     if connecting_handle then
