@@ -503,25 +503,34 @@ end
 -- ############### --
 -- # Frame pump    # --
 -- ############### --
+local MIN_SPAWN_INTERVAL_SECONDS = 1.0
+local last_spawn_finish = 0
 
 local function update_enemy_spawns()
     local req = pending_enemy_spawns[1]
     if not req then return end
+    if not req.started then
+        if os.clock() - last_spawn_finish < MIN_SPAWN_INTERVAL_SECONDS then return end
+        req.started = true
+    end
     local ok, result = kh1.spawn_enemy(req.model, req.x, req.y, req.z)
     if ok then
         table.remove(pending_enemy_spawns, 1)
+        last_spawn_finish = os.clock()
         local detail = string.format("spawn_enemy(\"%s\") entity=0x%X", req.model, math.floor(result))
         log(detail)
         send_response(req.id, STATUS_SUCCESS, detail)
     elseif result == "loading" then
         if os.clock() >= req.deadline then
             table.remove(pending_enemy_spawns, 1)
+            last_spawn_finish = os.clock()
             local detail = string.format("spawn_enemy(\"%s\") timed out loading", req.model)
             log(detail)
             send_response(req.id, STATUS_RETRY, detail)
         end
     else
         table.remove(pending_enemy_spawns, 1)
+        last_spawn_finish = os.clock()
         local detail = string.format("spawn_enemy(\"%s\") = %s", req.model, tostring(result))
         log(detail)
         send_response(req.id, STATUS_RETRY, detail)
