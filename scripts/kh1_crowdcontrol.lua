@@ -374,31 +374,31 @@ local function refresh_selectability(state)
     push_selectability(state)
 end
 
--- Slot needs differ per creature (Black Fungi 13, Screwdiver 3). One probe at a time: can_spawn_enemy
--- walks live entities per call, so all 34 at once would be costly.
-local SPAWN_PROBE_INTERVAL_SECONDS = 0.1
+local SPAWN_PROBE_INTERVAL_SECONDS = 0.5
 local next_spawn_probe = 0
+local last_spawn_has_room = nil
 local spawn_probe_list = {}
-local spawn_probe_index = 0
 for effect_code, model_path in pairs(ENEMY_SPAWN_EFFECTS) do
     spawn_probe_list[#spawn_probe_list + 1] = { code = effect_code, model = model_path }
 end
 
 local function update_one_spawn_effect_availability(state)
-    -- Only probe while ready: can_spawn_enemy's own cutscene/Gummi gates would otherwise
-    -- report every creature as roomless and wipe the verdicts.
     if state ~= "ready" or #spawn_probe_list == 0 then return end
     local now = os.clock()
     if now < next_spawn_probe then return end
     next_spawn_probe = now + SPAWN_PROBE_INTERVAL_SECONDS
 
-    spawn_probe_index = (spawn_probe_index % #spawn_probe_list) + 1
-    local entry = spawn_probe_list[spawn_probe_index]
-    local verdict, code = kh1.can_spawn_enemy(entry.model)
-    local has_room = (verdict == "ready")
-    if spawn_has_room[entry.code] == has_room then return end
-    spawn_has_room[entry.code] = has_room
-    log(string.format("%s has room: %s (%s)", entry.code, tostring(has_room), tostring(code)))
+    local has_room = true
+    if kh1.spawn_slot_stats then
+        local ok_s, free, _, ours = pcall(kh1.spawn_slot_stats)
+        if ok_s and free ~= nil then has_room = (free + (ours or 0)) > 0 end
+    end
+    if has_room == last_spawn_has_room then return end
+    last_spawn_has_room = has_room
+    for _, entry in ipairs(spawn_probe_list) do
+        spawn_has_room[entry.code] = has_room
+    end
+    log(string.format("spawn room available: %s", tostring(has_room)))
     push_selectability(state)
 end
 
@@ -562,6 +562,14 @@ local function update_enemy_spawns()
 
         table.remove(pending_enemy_spawns, 1)
         local reason = SPAWN_FAIL_MESSAGES[result] or ("Spawn failed: " .. tostring(result))
+        if result == "slots_full" and kh1.spawn_slot_stats then
+            local ok_s, free, total, ours = pcall(kh1.spawn_slot_stats)
+            if ok_s and total then
+                local game_used = total - free - (ours or 0)
+                reason = string.format("Room is full -- %d/%d creature slots free (game is using %d here). Wait for spawns to die or try a less crowded room.",
+                    free, total, game_used)
+            end
+        end
         local status = RETRY_REASONS[result] and STATUS_RETRY or STATUS_FAILURE
         log(string.format("spawn_enemy(\"%s\") failed: %s -- %s", req.model, tostring(result), reason))
         send_response(req.id, status, reason)
