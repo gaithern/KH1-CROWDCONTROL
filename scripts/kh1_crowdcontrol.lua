@@ -165,11 +165,13 @@ end
 -- frame preserves the crash-containment invariant (never trigger multiple loads in a frame).
 -- update_enemy_spawns (the driver) is defined near the frame pump, where STATUS_* are in scope.
 local pending_enemy_spawns = {}
-local ENEMY_SPAWN_TIMEOUT_SECONDS = 10.0
+local ENEMY_SPAWN_TIMEOUT_SECONDS = 5.0   -- how long we wait on ONE load before giving up
+local CC_ANSWER_SECONDS = 8.0             -- answer every queued request before CC's ~10s TCP timeout
 
 local function enqueue_enemy_spawn(request_id, model_path, x, y, z)
     pending_enemy_spawns[#pending_enemy_spawns + 1] = {
         id = request_id, model = model_path, x = x, y = y, z = z,
+        queued = os.clock(),
         deadline = os.clock() + ENEMY_SPAWN_TIMEOUT_SECONDS,
     }
 end
@@ -524,11 +526,22 @@ local SPAWN_FAIL_MESSAGES = {
     bad_args         = "Bad spawn request.",
 }
 
+local RETRY_REASONS = { cutscene = true, boss_slowdown = true }
+
 local function update_enemy_spawns()
+    local now = os.clock()
+    for i = #pending_enemy_spawns, 2, -1 do
+        local r = pending_enemy_spawns[i]
+        if now - r.queued >= CC_ANSWER_SECONDS then
+            table.remove(pending_enemy_spawns, i)
+            send_response(r.id, STATUS_FAILURE, "The game was too busy spawning to reach this one.")
+        end
+    end
+
     local req = pending_enemy_spawns[1]
     if not req then return end
     if not req.started then
-        if os.clock() - last_spawn_finish < MIN_SPAWN_INTERVAL_SECONDS then return end
+        if now - last_spawn_finish < MIN_SPAWN_INTERVAL_SECONDS then return end
         req.started = true
     end
     local ok, result = kh1.spawn_enemy(req.model, req.x, req.y, req.z)
@@ -543,15 +556,15 @@ local function update_enemy_spawns()
             table.remove(pending_enemy_spawns, 1)
             last_spawn_finish = os.clock()
             log(string.format("spawn_enemy(\"%s\") timed out loading", req.model))
-            send_response(req.id, STATUS_RETRY, "Spawn timed out while loading.")
+            send_response(req.id, STATUS_FAILURE, "The creature took too long to load.")
         end
     else
-        -- Terminal failure: no load happened, so DON'T rate-limit -- drain the queue fast so every
-        -- request gets an answer (a slow drain lets Crowd Control TCP-timeout, which hides the why).
+
         table.remove(pending_enemy_spawns, 1)
         local reason = SPAWN_FAIL_MESSAGES[result] or ("Spawn failed: " .. tostring(result))
+        local status = RETRY_REASONS[result] and STATUS_RETRY or STATUS_FAILURE
         log(string.format("spawn_enemy(\"%s\") failed: %s -- %s", req.model, tostring(result), reason))
-        send_response(req.id, STATUS_RETRY, reason)
+        send_response(req.id, status, reason)
     end
 end
 
