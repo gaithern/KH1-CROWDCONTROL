@@ -261,10 +261,16 @@ local function display_name(code)
 end
 
 local EFFECT_TEXT_SECONDS = 4
+local ANNOUNCE_STYLE = 0        -- 0 = subtitle text, no box (Ghidra-confirmed)
+-- Position offsets the box CENTER from screen center (254,180): x=0 stays horizontally centered,
+-- negative y moves it up. -130 puts the box near the top. Tweak y to taste (more negative = higher).
+local ANNOUNCE_X = 0
+local ANNOUNCE_Y = -130
 local function announce_effect(code, viewer)
     if not kh1.open_text_box then return end
     local who = (viewer and viewer ~= "") and viewer or "the crowd"
-    pcall(kh1.open_text_box, display_name(code) .. "\nby " .. who, 1, EFFECT_TEXT_SECONDS)
+    pcall(kh1.open_text_box, display_name(code) .. " by " .. who, 1,
+        EFFECT_TEXT_SECONDS, ANNOUNCE_STYLE, ANNOUNCE_X, ANNOUNCE_Y)
 end
 
 -- ############### --
@@ -328,11 +334,11 @@ local function get_effect_readiness()
     return "ready", nil
 end
 
--- This used to send "notready", which isn't a state Crowd Control recognises and was ignored.
+-- All effects are always available now -- the queue/Wait system handles timing -- so we always
+-- report "ready" to Crowd Control and it never greys anything out. (get_effect_readiness is still
+-- used on the fire path to defer firing into a cutscene/menu.)
 local function current_game_state()
-    -- Drops the second return value; callers pass this straight into message builders.
-    local state = get_effect_readiness()
-    return state
+    return "ready"
 end
 
 local function send_game_state_reply(request_id, state)
