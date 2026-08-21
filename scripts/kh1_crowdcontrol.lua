@@ -506,6 +506,24 @@ end
 local MIN_SPAWN_INTERVAL_SECONDS = 1.0
 local last_spawn_finish = 0
 
+-- Human-readable reasons surfaced to Crowd Control, so a failed spawn shows WHY instead of a
+-- generic retry / TCP timeout. Keyed by the code kh1.spawn_enemy returns.
+local SPAWN_FAIL_MESSAGES = {
+    slots_full       = "No free creature slots right now -- wait for some to die.",
+    ctor_failed      = "Too many enemies on screen -- the game refused to add another.",
+    handles_full     = "Resource handles exhausted -- the game needs a restart.",
+    no_data          = "No spawn data for this creature.",
+    cutscene         = "Can't spawn during a cutscene.",
+    boss_slowdown    = "Can't spawn during the boss-defeat slow-mo.",
+    load_failed      = "Failed to start the creature load.",
+    splice_failed    = "Internal spawn error (placement splice).",
+    install_failed   = "Spawn system failed to install.",
+    registry_full    = "Spawn registry is full.",
+    buf_alloc_failed = "Out of memory for the spawn buffer.",
+    mint_failed      = "Internal spawn error (resource handle).",
+    bad_args         = "Bad spawn request.",
+}
+
 local function update_enemy_spawns()
     local req = pending_enemy_spawns[1]
     if not req then return end
@@ -524,16 +542,16 @@ local function update_enemy_spawns()
         if os.clock() >= req.deadline then
             table.remove(pending_enemy_spawns, 1)
             last_spawn_finish = os.clock()
-            local detail = string.format("spawn_enemy(\"%s\") timed out loading", req.model)
-            log(detail)
-            send_response(req.id, STATUS_RETRY, detail)
+            log(string.format("spawn_enemy(\"%s\") timed out loading", req.model))
+            send_response(req.id, STATUS_RETRY, "Spawn timed out while loading.")
         end
     else
+        -- Terminal failure: no load happened, so DON'T rate-limit -- drain the queue fast so every
+        -- request gets an answer (a slow drain lets Crowd Control TCP-timeout, which hides the why).
         table.remove(pending_enemy_spawns, 1)
-        last_spawn_finish = os.clock()
-        local detail = string.format("spawn_enemy(\"%s\") = %s", req.model, tostring(result))
-        log(detail)
-        send_response(req.id, STATUS_RETRY, detail)
+        local reason = SPAWN_FAIL_MESSAGES[result] or ("Spawn failed: " .. tostring(result))
+        log(string.format("spawn_enemy(\"%s\") failed: %s -- %s", req.model, tostring(result), reason))
+        send_response(req.id, STATUS_RETRY, reason)
     end
 end
 
