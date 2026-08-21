@@ -241,6 +241,32 @@ for code, model_path in pairs(ENEMY_SPAWN_EFFECTS) do
     }
 end
 
+-- ####################### --
+-- # Effect announcement   # --
+-- ####################### --
+
+-- Friendly display name for the in-game "who triggered what" text box.
+local EFFECT_NAME_OVERRIDES = {
+    ko_sora = "KO Sora",
+    heartless_angel_sora = "Heartless Angel",
+    no_combos = "No Combos",
+}
+local function display_name(code)
+    if EFFECT_NAME_OVERRIDES[code] then return EFFECT_NAME_OVERRIDES[code] end
+    if ABILITY_EFFECTS[code] then return ABILITY_EFFECTS[code] end
+    if MESSAGE_PRESETS[code] then return "Message: " .. MESSAGE_PRESETS[code] end
+    local base = code:gsub("^spawn_", ""):gsub("^give_", "")
+    base = base:gsub("_", " "):gsub("(%a)([%w]*)", function(a, b) return a:upper() .. b end)
+    return base
+end
+
+local EFFECT_TEXT_SECONDS = 4
+local function announce_effect(code, viewer)
+    if not kh1.open_text_box then return end
+    local who = (viewer and viewer ~= "") and viewer or "the crowd"
+    pcall(kh1.open_text_box, display_name(code) .. "\nby " .. who, 1, EFFECT_TEXT_SECONDS)
+end
+
 -- ############### --
 -- # Connection    # --
 -- ############### --
@@ -315,101 +341,6 @@ local function send_game_state_reply(request_id, state)
     ccnet.cc_send(socket_handle, msg .. "\0")
 end
 
-local STATUS_SELECTABLE     = "selectable"
-local STATUS_NOT_SELECTABLE = "notSelectable"
-
--- ResponseType.EffectStatus. NOT 0, which is EffectRequest -- with id=0 there's no pending
--- request to match on, so the type is the only thing marking this as a status message.
-local RESPONSE_TYPE_EFFECT_STATUS = 0x01
-
--- EffectUpdate takes an `ids` ARRAY (its `code` field is deprecated), so one message covers
--- every effect sharing a status.
-local function send_effect_class(ids, status, message)
-    if not socket_handle or #ids == 0 then return end
-    local payload = json.encode({
-        id = 0, -- class messages aren't answering a request
-        type = RESPONSE_TYPE_EFFECT_STATUS,
-        ids = ids,
-        status = status,
-        message = message,
-    })
-    ccnet.cc_send(socket_handle, payload .. "\0")
-end
-
--- spawn_has_room persists across state flips; sent_selectable is what Crowd Control was last
--- told. Keeping them apart is what stops a cutscene wiping every per-creature verdict.
-local spawn_has_room = {}
-local sent_selectable = {}
-
-local function desired_selectable(effect_code, state)
-    if state ~= "ready" then return false end
-    if ENEMY_SPAWN_EFFECTS[effect_code] then return spawn_has_room[effect_code] == true end
-    return true
-end
-
--- Sends only what actually changed, so a ready<->cutscene flip costs nothing for effects
--- already in the right state.
-local function push_selectability(state)
-    local on, off = {}, {}
-    for effect_code in pairs(effect_handlers) do
-        local want = desired_selectable(effect_code, state)
-        if sent_selectable[effect_code] ~= want then
-            sent_selectable[effect_code] = want
-            local bucket = want and on or off
-            bucket[#bucket + 1] = effect_code
-        end
-    end
-    if #on == 0 and #off == 0 then return end
-    -- One update per state, matching WarpWorld's Enable/DisableEffects. No visible assert:
-    -- we never hide anything, and the reference doesn't pair the two.
-    send_effect_class(on, STATUS_SELECTABLE)
-    send_effect_class(off, STATUS_NOT_SELECTABLE, state ~= "ready"
-        and "Not possible right now -- check back in a moment."
-        or "Not enough free creature slots right now.")
-    log(string.format("Selectability for '%s': %d available, %d unavailable", state, #on, #off))
-end
-
--- A push sent before Crowd Control finished registering the pack is dropped, and diffs alone
--- would never re-send it. Re-assert the whole set periodically so it self-heals.
-local FULL_REFRESH_INTERVAL_SECONDS = 10
-local next_full_refresh = 0
-
-local function refresh_selectability(state)
-    local now = os.clock()
-    if now < next_full_refresh then return end
-    next_full_refresh = now + FULL_REFRESH_INTERVAL_SECONDS
-    sent_selectable = {}
-    push_selectability(state)
-end
-
-local SPAWN_PROBE_INTERVAL_SECONDS = 0.5
-local next_spawn_probe = 0
-local last_spawn_has_room = nil
-local spawn_probe_list = {}
-for effect_code, model_path in pairs(ENEMY_SPAWN_EFFECTS) do
-    spawn_probe_list[#spawn_probe_list + 1] = { code = effect_code, model = model_path }
-end
-
-local function update_one_spawn_effect_availability(state)
-    if state ~= "ready" or #spawn_probe_list == 0 then return end
-    local now = os.clock()
-    if now < next_spawn_probe then return end
-    next_spawn_probe = now + SPAWN_PROBE_INTERVAL_SECONDS
-
-    local has_room = true
-    if kh1.spawn_slot_stats then
-        local ok_s, free, _, ours = pcall(kh1.spawn_slot_stats)
-        if ok_s and free ~= nil then has_room = (free + (ours or 0)) > 0 end
-    end
-    if has_room == last_spawn_has_room then return end
-    last_spawn_has_room = has_room
-    for _, entry in ipairs(spawn_probe_list) do
-        spawn_has_room[entry.code] = has_room
-    end
-    log(string.format("spawn room available: %s", tostring(has_room)))
-    push_selectability(state)
-end
-
 -- The state flaps across transitions (ready<->cutscene several times a second) and every change
 -- re-marks 90 effects, so only report once it has held still.
 local STATE_DEBOUNCE_SECONDS = 0.5
@@ -446,9 +377,9 @@ function send_response(request_id, status, message, time_remaining)
     ccnet.cc_send(socket_handle, json.encode(payload) .. "\0")
 end
 
-local function handle_request(id, msg_type, code, duration)
-    log(string.format("Received request: id=%s type=%s code=%s duration=%s",
-        tostring(id), tostring(msg_type), tostring(code), tostring(duration)))
+local function handle_request(id, msg_type, code, duration, viewer)
+    log(string.format("Received request: id=%s type=%s code=%s duration=%s viewer=%s",
+        tostring(id), tostring(msg_type), tostring(code), tostring(duration), tostring(viewer)))
 
     if msg_type == GAME_UPDATE_TYPE then
         send_game_state_reply(id, current_game_state())
@@ -494,6 +425,7 @@ local function handle_request(id, msg_type, code, duration)
         message = string.format("No handler for code '%s'", tostring(code))
         log(message)
     else
+        announce_effect(code, viewer)
         local call_ok, apply_ok = pcall(handler.apply, id)
         if not call_ok then
             message = string.format("Effect '%s' errored: %s", tostring(code), tostring(apply_ok))
@@ -589,6 +521,7 @@ end
 
 function update_crowdcontrol()
     update_enemy_spawns()
+    if kh1.update_text_boxes then kh1.update_text_boxes() end
     spawn_dispatched_this_frame = false
 
     if connecting_handle then
@@ -599,11 +532,6 @@ function update_crowdcontrol()
             log(string.format("Connected to %s:%d", CC_HOST, CC_PORT))
             last_reported_state = current_game_state()
             send_game_state(last_reported_state)
-            -- Crowd Control doesn't remember what a previous session reported. The re-assert is
-            -- delayed a few seconds because this first push lands before the pack is registered.
-            sent_selectable = {}
-            next_full_refresh = os.clock() + 3
-            push_selectability(last_reported_state)
         elseif status == "failed" then
             ccnet.cc_close(connecting_handle)
             connecting_handle = nil
@@ -622,21 +550,15 @@ function update_crowdcontrol()
     end
 
     local state = settled_game_state()
-    if state then
-        if state ~= last_reported_state then
-            last_reported_state = state
-            send_game_state(state)
-        end
-        push_selectability(state)
-        refresh_selectability(state)
-        update_one_spawn_effect_availability(state)
+    if state and state ~= last_reported_state then
+        last_reported_state = state
+        send_game_state(state)
     end
 
     while true do
-        local status, a, b, c, d = ccnet.cc_poll_message(socket_handle)
+        local status, a, b, c, d, e = ccnet.cc_poll_message(socket_handle)
         if status == "message" then
-            local id, msg_type, code, duration = a, b, c, d
-            handle_request(id, msg_type, code, duration)
+            handle_request(a, b, c, d, e)
         elseif status == "closed" then
             log(string.format("Connection lost (%s), will retry", tostring(a)))
             disconnect()

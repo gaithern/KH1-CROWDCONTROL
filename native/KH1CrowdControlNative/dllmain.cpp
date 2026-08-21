@@ -309,15 +309,17 @@ extern "C" int l_cc_poll_message(void* L) {
     bool hasId = ExtractIntField(message, "id", id);
     bool hasType = ExtractIntField(message, "type", msgType);
     bool hasDuration = ExtractIntField(message, "duration", duration);
-    std::string code;
+    std::string code, viewer;
     bool hasCode = ExtractStringField(message, "code", code);
+    bool hasViewer = ExtractStringField(message, "viewer", viewer);
 
     p_lua_pushstring(L, "message");
     if (hasId) p_lua_pushinteger(L, id); else p_lua_pushnil(L);
     if (hasType) p_lua_pushinteger(L, msgType); else p_lua_pushnil(L);
     if (hasCode) p_lua_pushlstring(L, code.c_str(), code.size()); else p_lua_pushnil(L);
     if (hasDuration) p_lua_pushinteger(L, duration); else p_lua_pushnil(L);
-    return 5;
+    if (hasViewer) p_lua_pushlstring(L, viewer.c_str(), viewer.size()); else p_lua_pushnil(L);
+    return 6;
 }
 
 extern "C" int l_cc_close(void* L) {
