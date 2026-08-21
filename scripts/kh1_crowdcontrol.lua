@@ -22,6 +22,11 @@ local send_response
 
 local PENDING_RESPONSE = {}
 
+local STATUS_SUCCESS = 0
+local STATUS_RETRY   = 3
+local STATUS_FAILURE = 1
+local STATUS_WAIT    = 9
+
 -- ####################### --
 -- # Effect dispatch table # --
 -- ####################### --
@@ -166,14 +171,18 @@ end
 -- update_enemy_spawns (the driver) is defined near the frame pump, where STATUS_* are in scope.
 local pending_enemy_spawns = {}
 local ENEMY_SPAWN_TIMEOUT_SECONDS = 5.0   -- how long we wait on ONE load before giving up
-local CC_ANSWER_SECONDS = 8.0             -- answer every queued request before CC's ~10s TCP timeout
+local CC_ANSWER_SECONDS = 13.0           -- give up on a queued request just under the Wait window (15s)
+local MAX_ENEMY_SPAWN_QUEUE = 3           -- reject overflow at once instead of leaving it unanswered
+local SPAWN_WAIT_MS = 15000               -- Wait window we ask CC to hold before our terminal follow-up
 
 local function enqueue_enemy_spawn(request_id, model_path, x, y, z)
+    if #pending_enemy_spawns >= MAX_ENEMY_SPAWN_QUEUE then return false end
     pending_enemy_spawns[#pending_enemy_spawns + 1] = {
         id = request_id, model = model_path, x = x, y = y, z = z,
         queued = os.clock(),
         deadline = os.clock() + ENEMY_SPAWN_TIMEOUT_SECONDS,
     }
+    return true
 end
 
 local ENEMY_SPAWN_EFFECTS = {
@@ -221,7 +230,12 @@ for code, model_path in pairs(ENEMY_SPAWN_EFFECTS) do
             local radius = 250 + math.random() * 150
             local x = pos["X"] + math.cos(angle) * radius
             local z = pos["Z"] + math.sin(angle) * radius
-            enqueue_enemy_spawn(request_id, model_path, x, pos["Y"], z)
+            if enqueue_enemy_spawn(request_id, model_path, x, pos["Y"], z) then
+                -- Acknowledge with Wait so CC holds the effect (no re-fire); we answer terminally on construct.
+                send_response(request_id, STATUS_WAIT, "Spawning " .. model_path, SPAWN_WAIT_MS)
+            else
+                send_response(request_id, STATUS_FAILURE, "Too many spawns queued right now -- give it a moment.")
+            end
             return PENDING_RESPONSE
         end,
     }
@@ -255,12 +269,6 @@ end
 -- ############### --
 -- # Effect replies # --
 -- ############### --
-
-local STATUS_SUCCESS = 0
--- Retry is what the docs call "the normal failure response"; Failure and Unavailable both say
--- "you probably don't want this" (Failure refunds and ends it, Unavailable kills the effect).
-local STATUS_RETRY   = 3
-local STATUS_FAILURE = 1
 
 local GAME_UPDATE_TYPE = 253
 
@@ -426,11 +434,14 @@ end
 
 local spawn_dispatched_this_frame = false
 
-function send_response(request_id, status, message)
+function send_response(request_id, status, message, time_remaining)
     if not socket_handle then return end
     local payload = { id = request_id, type = 0, status = status }
     if message then
         payload.message = message
+    end
+    if time_remaining then
+        payload.timeRemaining = time_remaining
     end
     ccnet.cc_send(socket_handle, json.encode(payload) .. "\0")
 end
@@ -548,14 +559,14 @@ local function update_enemy_spawns()
     if ok then
         table.remove(pending_enemy_spawns, 1)
         last_spawn_finish = os.clock()
-        local detail = string.format("spawn_enemy(\"%s\") entity=0x%X", req.model, math.floor(result))
-        log(detail)
-        send_response(req.id, STATUS_SUCCESS, detail)
+        log(string.format("spawn_enemy(\"%s\") entity=0x%X", req.model, math.floor(result)))
+        send_response(req.id, STATUS_SUCCESS, "Spawned " .. req.model)
     elseif result == "loading" then
+        -- Already acknowledged with STATUS_WAIT when queued, so CC is holding it -- just keep driving.
         if os.clock() >= req.deadline then
             table.remove(pending_enemy_spawns, 1)
             last_spawn_finish = os.clock()
-            log(string.format("spawn_enemy(\"%s\") timed out loading", req.model))
+            log(string.format("spawn_enemy(\"%s\") load timed out", req.model))
             send_response(req.id, STATUS_FAILURE, "The creature took too long to load.")
         end
     else
