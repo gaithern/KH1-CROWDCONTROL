@@ -7,11 +7,11 @@ local json = require("json")
 local ccnet = require("kh1_crowdcontrol_native")
 
 local CC_HOST = "127.0.0.1"
-local CC_PORT = 43384 -- must match the port the Crowd Control app's SimpleTCP connector is configured to use for this pack
+local CC_PORT = 43384
 local RECONNECT_INTERVAL_SECONDS = 5
 
 local socket_handle = nil
-local connecting_handle = nil -- non-nil while a non-blocking connect is in flight (see try_connect)
+local connecting_handle = nil
 local next_reconnect_attempt = 0
 
 local function log(msg)
@@ -27,18 +27,7 @@ local STATUS_RETRY   = 3
 local STATUS_FAILURE = 1
 local STATUS_WAIT    = 9
 
--- ####################### --
--- # Effect dispatch table # --
--- ####################### --
-
 local effect_handlers = {
-    -- ####################### --
-    -- # Combo limit         # --
-    -- ####################### --
-
-
-    -- The game itself restores the combo limits on the next menu or room
-    -- transition, so this is a one-shot effect with no revert timer.
     no_combos = {
         apply = function()
             kh1.set_ground_combo_length_limit(1)
@@ -46,10 +35,6 @@ local effect_handlers = {
             return true
         end,
     },
-
-    -- ####################### --
-    -- # KO / danger         # --
-    -- ####################### --
 
     ko_sora = {
         apply = function()
@@ -66,9 +51,6 @@ local effect_handlers = {
     },
 }
 
--- ####################### --
--- # Ability grants        # --
--- ####################### --
 local ABILITY_EFFECTS = {
     ability_vortex          = "Vortex",
     ability_aerial_sweep    = "Aerial Sweep",
@@ -98,17 +80,12 @@ local ABILITY_EFFECTS = {
 for code, ability_name in pairs(ABILITY_EFFECTS) do
     effect_handlers[code] = {
         apply = function()
-            -- enable_ability returns nothing; a silent no-op on an unrecognised
-            -- name is the only failure mode, and the names are fixed above.
             kh1.enable_ability(ability_name)
             return true
         end,
     }
 end
 
--- ####################### --
--- # Item grants           # --
--- ####################### --
 local GIVE_ITEM_EFFECTS = {
     give_potion = 1,
     give_hi_potion = 2,
@@ -132,9 +109,6 @@ for code, item_id in pairs(GIVE_ITEM_EFFECTS) do
     }
 end
 
--- ####################### --
--- # Message (preset list) # --
--- ####################### --
 local MESSAGE_PRESETS = {
     message_gg = "GG",
     message_nice = "Nice!",
@@ -161,19 +135,11 @@ for code, text in pairs(MESSAGE_PRESETS) do
     }
 end
 
--- ####################### --
--- # Enemy spawns          # --
--- ####################### --
-
--- kh1.spawn_enemy is now a polled primitive: (model, x, y, z) -> ok, result_or_reason. We own
--- the retry loop it used to run internally (the old kh1.update_spawn_enemy). One attempt per
--- frame preserves the crash-containment invariant (never trigger multiple loads in a frame).
--- update_enemy_spawns (the driver) is defined near the frame pump, where STATUS_* are in scope.
 local pending_enemy_spawns = {}
-local ENEMY_SPAWN_TIMEOUT_SECONDS = 5.0   -- how long we wait on ONE load before giving up
-local CC_ANSWER_SECONDS = 13.0           -- give up on a queued request just under the Wait window (15s)
-local MAX_ENEMY_SPAWN_QUEUE = 3           -- reject overflow at once instead of leaving it unanswered
-local SPAWN_WAIT_MS = 15000               -- Wait window we ask CC to hold before our terminal follow-up
+local ENEMY_SPAWN_TIMEOUT_SECONDS = 5.0
+local CC_ANSWER_SECONDS = 13.0
+local MAX_ENEMY_SPAWN_QUEUE = 3
+local SPAWN_WAIT_MS = 15000
 
 local function enqueue_enemy_spawn(request_id, model_path, x, y, z)
     if #pending_enemy_spawns >= MAX_ENEMY_SPAWN_QUEUE then return false end
@@ -223,7 +189,6 @@ local ENEMY_SPAWN_EFFECTS = {
 }
 for code, model_path in pairs(ENEMY_SPAWN_EFFECTS) do
     effect_handlers[code] = {
-
         apply = function(request_id)
             local pos = kh1.get_sora_pos()
             local angle = math.random() * 2 * math.pi
@@ -231,7 +196,6 @@ for code, model_path in pairs(ENEMY_SPAWN_EFFECTS) do
             local x = pos["X"] + math.cos(angle) * radius
             local z = pos["Z"] + math.sin(angle) * radius
             if enqueue_enemy_spawn(request_id, model_path, x, pos["Y"], z) then
-                -- Acknowledge with Wait so CC holds the effect (no re-fire); we answer terminally on construct.
                 send_response(request_id, STATUS_WAIT, "Spawning " .. model_path, SPAWN_WAIT_MS)
             else
                 send_response(request_id, STATUS_FAILURE, "Too many spawns queued right now -- give it a moment.")
@@ -241,11 +205,6 @@ for code, model_path in pairs(ENEMY_SPAWN_EFFECTS) do
     }
 end
 
--- ####################### --
--- # Effect announcement   # --
--- ####################### --
-
--- Friendly display name for the in-game "who triggered what" text box.
 local EFFECT_NAME_OVERRIDES = {
     ko_sora = "KO Sora",
     heartless_angel_sora = "Heartless Angel",
@@ -260,10 +219,8 @@ local function display_name(code)
     return base
 end
 
-local EFFECT_TEXT_SECONDS = 4
-local ANNOUNCE_STYLE = 0        -- 0 = subtitle text, no box (Ghidra-confirmed)
--- Position offsets the box CENTER from screen center (254,180): x=0 stays horizontally centered,
--- negative y moves it up. -130 puts the box near the top. Tweak y to taste (more negative = higher).
+local EFFECT_TEXT_SECONDS = 1
+local ANNOUNCE_STYLE = 0
 local ANNOUNCE_X = 0
 local ANNOUNCE_Y = -130
 local function announce_effect(code, viewer)
@@ -272,10 +229,6 @@ local function announce_effect(code, viewer)
     pcall(kh1.open_text_box, display_name(code) .. " by " .. who, 1,
         EFFECT_TEXT_SECONDS, ANNOUNCE_STYLE, ANNOUNCE_X, ANNOUNCE_Y)
 end
-
--- ############### --
--- # Connection    # --
--- ############### --
 
 local function try_connect()
     local ok, handle_or_err = ccnet.cc_connect(CC_HOST, CC_PORT)
@@ -298,10 +251,6 @@ local function disconnect()
     end
 end
 
--- ############### --
--- # Effect replies # --
--- ############### --
-
 local GAME_UPDATE_TYPE = 253
 
 local function send_game_state(state)
@@ -313,8 +262,6 @@ end
 
 local last_reported_state = nil
 
--- Is it safe to fire an effect right now? Returns a Crowd Control GameState + a reason.
--- Not loaded into a world: 0xFF is the "no world" sentinel, live-confirmed on the title screen.
 local function get_effect_readiness()
     if kh1.get_world() == 0xFF then
         return "menu", "the game isn't in a world (title screen or loading)"
@@ -334,9 +281,6 @@ local function get_effect_readiness()
     return "ready", nil
 end
 
--- All effects are always available now -- the queue/Wait system handles timing -- so we always
--- report "ready" to Crowd Control and it never greys anything out. (get_effect_readiness is still
--- used on the fire path to defer firing into a cutscene/menu.)
 local function current_game_state()
     return "ready"
 end
@@ -347,8 +291,6 @@ local function send_game_state_reply(request_id, state)
     ccnet.cc_send(socket_handle, msg .. "\0")
 end
 
--- The state flaps across transitions (ready<->cutscene several times a second) and every change
--- re-marks 90 effects, so only report once it has held still.
 local STATE_DEBOUNCE_SECONDS = 0.5
 local candidate_state, candidate_state_since = nil, 0
 
@@ -401,7 +343,6 @@ local function handle_request(id, msg_type, code, duration, viewer)
         local message = string.format("Not right now -- %s. Queued; it'll fire shortly.",
                                       reason or state)
         log(string.format("Deferred '%s': %s", tostring(code), message))
-        -- Retry, not Failure: the viewer keeps their coins and Crowd Control re-sends.
         send_response(id, STATUS_RETRY, message)
         return
     end
@@ -451,14 +392,9 @@ local function handle_request(id, msg_type, code, duration, viewer)
     send_response(id, ok and STATUS_SUCCESS or STATUS_FAILURE, message)
 end
 
--- ############### --
--- # Frame pump    # --
--- ############### --
 local MIN_SPAWN_INTERVAL_SECONDS = 1.0
 local last_spawn_finish = 0
 
--- Human-readable reasons surfaced to Crowd Control, so a failed spawn shows WHY instead of a
--- generic retry / TCP timeout. Keyed by the code kh1.spawn_enemy returns.
 local SPAWN_FAIL_MESSAGES = {
     ctor_failed      = "Too many enemies on screen -- the game refused to add another.",
     handles_full     = "Resource handles exhausted -- the game needs a restart.",
@@ -499,7 +435,6 @@ local function update_enemy_spawns()
         log(string.format("spawn_enemy(\"%s\") entity=0x%X", req.model, math.floor(result)))
         send_response(req.id, STATUS_SUCCESS, "Spawned " .. req.model)
     elseif result == "loading" then
-        -- Already acknowledged with STATUS_WAIT when queued, so CC is holding it -- just keep driving.
         if os.clock() >= req.deadline then
             table.remove(pending_enemy_spawns, 1)
             last_spawn_finish = os.clock()
@@ -507,7 +442,6 @@ local function update_enemy_spawns()
             send_response(req.id, STATUS_FAILURE, "The creature took too long to load.")
         end
     else
-
         table.remove(pending_enemy_spawns, 1)
         local reason = SPAWN_FAIL_MESSAGES[result] or ("Spawn failed: " .. tostring(result))
         local status = RETRY_REASONS[result] and STATUS_RETRY or STATUS_FAILURE
