@@ -262,7 +262,20 @@ end
 
 local last_reported_state = nil
 
+-- Hard-block states: reject outright (never queue). Gummi ship, plus inCutscene > 5 which flags a
+-- coliseum cup / minigame mode. Ordinary cutscenes/transitions read 1..5 and stay soft (queue).
+local function hard_block_reason()
+    if kh1.is_in_gummi() then return "Can't do that in the Gummi ship." end
+    if ReadInt(inCutscene) > 3 then return "Can't do that during a cup or minigame." end
+    return nil
+end
+
 local function get_effect_readiness()
+    -- Hard blocks first: world-select reports world==0xFF, so they must precede that check.
+    local hb = hard_block_reason()
+    if hb then
+        return "wrongMode", hb
+    end
     if kh1.get_world() == 0xFF then
         return "menu", "the game isn't in a world (title screen or loading)"
     end
@@ -272,16 +285,17 @@ local function get_effect_readiness()
     if ReadByte(menu) ~= 0 then
         return "menu", "a menu is open"
     end
-    if kh1.is_in_gummi_garage() then
-        return "wrongMode", "the player is in the Gummi ship"
-    end
     if kh1.sora_koed() then
         return "badPlayerState", "Sora is KO'd"
     end
     return "ready", nil
 end
 
+-- Effects are always available EXCEPT hard-block states (Gummi ship, cutscene/minigame), where we
+-- report a non-ready state so Crowd Control greys them out. Everything else stays available -- the
+-- queue/Wait system handles timing.
 local function current_game_state()
+    if hard_block_reason() then return "wrongMode" end
     return "ready"
 end
 
@@ -339,6 +353,13 @@ local function handle_request(id, msg_type, code, duration, viewer)
     end
 
     local state, reason = get_effect_readiness()
+    if state == "wrongMode" then
+        -- Hard-block (Gummi ship / cutscene / minigame): reject, don't queue.
+        local message = reason or "Can't do that right now."
+        log(string.format("Rejected '%s': %s", tostring(code), message))
+        send_response(id, STATUS_FAILURE, message)
+        return
+    end
     if state ~= "ready" then
         local message = string.format("Not right now -- %s. Queued; it'll fire shortly.",
                                       reason or state)
