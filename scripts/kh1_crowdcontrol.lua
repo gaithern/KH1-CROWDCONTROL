@@ -262,11 +262,9 @@ end
 
 local last_reported_state = nil
 
--- Hard-block states: reject outright (never queue). Gummi ship, plus inCutscene > 5 which flags a
--- coliseum cup / minigame mode. Ordinary cutscenes/transitions read 1..5 and stay soft (queue).
 local function hard_block_reason()
     if kh1.is_in_gummi() then return "Can't do that in the Gummi ship." end
-    if ReadInt(inCutscene) > 3 then return "Can't do that during a cup or minigame." end
+    if ReadInt(inCutscene) > 3 then return "Can't do that during a minigame." end
     return nil
 end
 
