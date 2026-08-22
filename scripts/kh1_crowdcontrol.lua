@@ -303,6 +303,39 @@ local function send_game_state_reply(request_id, state)
     ccnet.cc_send(socket_handle, msg .. "\0")
 end
 
+local STATUS_SELECTABLE     = "selectable"
+local STATUS_NOT_SELECTABLE = "notSelectable"
+local RESPONSE_TYPE_EFFECT_STATUS = 0x01
+
+local ALL_EFFECT_CODES = {}
+for code in pairs(effect_handlers) do
+    ALL_EFFECT_CODES[#ALL_EFFECT_CODES + 1] = code
+end
+
+local function send_effect_class(ids, status, message)
+    if not socket_handle or #ids == 0 then return end
+    ccnet.cc_send(socket_handle, json.encode({
+        id = 0,
+        type = RESPONSE_TYPE_EFFECT_STATUS,
+        ids = ids,
+        status = status,
+        message = message,
+    }) .. "\0")
+end
+
+local effects_greyed = nil -- tri-state: nil = never sent, then boolean
+local function push_effect_availability(force)
+    local blocked = hard_block_reason() ~= nil
+    if not force and blocked == effects_greyed then return end
+    effects_greyed = blocked
+    if blocked then
+        send_effect_class(ALL_EFFECT_CODES, STATUS_NOT_SELECTABLE, "Unavailable right now.")
+    else
+        send_effect_class(ALL_EFFECT_CODES, STATUS_SELECTABLE)
+    end
+    log(string.format("Effect availability: %s", blocked and "greyed (hard block)" or "available"))
+end
+
 local STATE_DEBOUNCE_SECONDS = 0.5
 local candidate_state, candidate_state_since = nil, 0
 
@@ -482,6 +515,8 @@ function update_crowdcontrol()
             log(string.format("Connected to %s:%d", CC_HOST, CC_PORT))
             last_reported_state = current_game_state()
             send_game_state(last_reported_state)
+            effects_greyed = nil
+            push_effect_availability(true)
         elseif status == "failed" then
             ccnet.cc_close(connecting_handle)
             connecting_handle = nil
@@ -504,6 +539,8 @@ function update_crowdcontrol()
         last_reported_state = state
         send_game_state(state)
     end
+
+    push_effect_availability(false)
 
     while true do
         local status, a, b, c, d, e = ccnet.cc_poll_message(socket_handle)
