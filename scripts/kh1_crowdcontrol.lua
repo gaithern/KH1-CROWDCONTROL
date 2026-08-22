@@ -460,7 +460,6 @@ local last_spawn_finish = 0
 -- Human-readable reasons surfaced to Crowd Control, so a failed spawn shows WHY instead of a
 -- generic retry / TCP timeout. Keyed by the code kh1.spawn_enemy returns.
 local SPAWN_FAIL_MESSAGES = {
-    slots_full       = "No free creature slots right now -- wait for some to die.",
     ctor_failed      = "Too many enemies on screen -- the game refused to add another.",
     handles_full     = "Resource handles exhausted -- the game needs a restart.",
     no_data          = "No spawn data for this creature.",
@@ -511,14 +510,6 @@ local function update_enemy_spawns()
 
         table.remove(pending_enemy_spawns, 1)
         local reason = SPAWN_FAIL_MESSAGES[result] or ("Spawn failed: " .. tostring(result))
-        if result == "slots_full" and kh1.spawn_slot_stats then
-            local ok_s, free, total, ours = pcall(kh1.spawn_slot_stats)
-            if ok_s and total then
-                local game_used = total - free - (ours or 0)
-                reason = string.format("Room is full -- %d/%d creature slots free (game is using %d here). Wait for spawns to die or try a less crowded room.",
-                    free, total, game_used)
-            end
-        end
         local status = RETRY_REASONS[result] and STATUS_RETRY or STATUS_FAILURE
         log(string.format("spawn_enemy(\"%s\") failed: %s -- %s", req.model, tostring(result), reason))
         send_response(req.id, status, reason)
