@@ -1,6 +1,6 @@
 # KH1 Crowd Control
 
-Lets Twitch [Crowd Control](https://crowdcontrol.live/) redemptions trigger real effects in Kingdom Hearts Final Mix (PC) — spawn items and Heartless near Sora, pop messages on screen, grant abilities, hinder combos, or KO him outright.
+Lets Twitch [Crowd Control](https://crowdcontrol.live/) redemptions trigger real effects in Kingdom Hearts Final Mix (PC) - spawn items and Heartless near Sora, pop messages on screen, grant abilities, hinder combos, or KO him outright.
 
 The mod is a thin connector: it opens a TCP connection to the Crowd Control app and dispatches the effects it receives into [KH1-LUA-LIBRARY](../KH1-LUA-LIBRARY), which does the actual game-memory work. It does not run standalone.
 

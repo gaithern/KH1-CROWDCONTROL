@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-build.py — full build: compile KH1CrowdControlNative, then regenerate mod.yml.
+build.py - full build: compile KH1CrowdControlNative, then regenerate mod.yml.
 
 Runs the KH1CrowdControlNative MSBuild project (its Release|x64 output drops
 kh1_crowdcontrol_native.dll straight into scripts/io_packages/), then
