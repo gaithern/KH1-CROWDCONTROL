@@ -1,22 +1,55 @@
 # KH1 Crowd Control
 
-Lets Twitch [Crowd Control](https://crowdcontrol.live/) redemptions trigger real effects in Kingdom Hearts Final Mix (PC) — spawn items and Heartless near Sora, pop messages on screen, grant abilities, cripple combos, or KO him outright.
+Lets Twitch [Crowd Control](https://crowdcontrol.live/) redemptions trigger real effects in Kingdom Hearts Final Mix (PC) — spawn items and Heartless near Sora, pop messages on screen, grant abilities, hinder combos, or KO him outright.
 
 The mod is a thin connector: it opens a TCP connection to the Crowd Control app and dispatches the effects it receives into [KH1-LUA-LIBRARY](../KH1-LUA-LIBRARY), which does the actual game-memory work. It does not run standalone.
 
-## Installation
+## Installing
+- Install Kingdom Hearts Final Mix (PC, Steam or EGS).
+- Open KH1 at least once.
+- Install OpenKH (Follow set up wizard instructions.  Install both LuaBackend and Panacea).
+- Install `gaithern/KH1-LUA-LIBRARY` as a mod in mods manager.
+- Install `gaithern/KH1-CROWDCONTROL` as a mod in mods manager.
+- Ensure you are running CrowdControl with the KH1 packet via Desktop App (or SDK).
 
-- Kingdom Hearts Final Mix (PC, Steam or EGS) with [OpenKH](https://openkh.dev/) (LuaBackend and Panacea).
-- [gaithern//KH1-CROWDCONTROL](https://github.com/gaithern/KH1-CROWDCONTROL) installed in OpenKH.
-- [gaithern/KH1-LUA-LIBRARY](https://github.com/gaithern/KH1-LUA-LIBRARY) installed in OpenKH.
-- The [Crowd Control app](https://crowdcontrol.live/) running on the same machine.
+## Repository Layout
+Below you'll find key components of the repository and their descriptions.
 
-## Effects
+- `native/KH1CrowdControlNative/*`
 
-Around 90 effects, all one-shot — item spawns, Heartless spawns, preset on-screen messages, ability grants, a combo-limit crush, Heartless Angel, and an instant KO. The full list lives in the `effect_handlers` table in the Lua script and mirrors the pack definition.
+  | File | Description |
+  | :--- | ----------: |
+  | `log.cpp` | Handles writing to a shared log for debugging purposes. |
+  | `lua_api.cpp` | Identifies the Lua module and populate Lua C function pointers. |
+  | `lua_bindings.cpp` | Exposes C++ to be used on the Lua side. |
+  | `message_parser.cpp` | Slim JSON handling for received packets from CrowdControl server. |
+  | `winsock.cpp` | Initializes/cleans up Windows Socket API for connection to CrowdControl server. |
 
-The mod reports real game state (cutscene, menu, Gummi ship, KO'd) back to Crowd Control, so effects are greyed out or queued for retry instead of firing into situations where they'd be wasted.
+- `pack/*`
 
-## Troubleshooting
+  | File | Description |
+  | :--- | ----------: |
+  | `kh1-crowdcontrol-pack.json` | Catalog of effects in JSON format. |
+  | `KH1CrowdControlPack.cs` | Catalog of effects in C# format. |
 
-Logs are written next to the DLLs: `kh1_crowdcontrol_native.log` for this mod's connection and effect activity, `kh1_native.log` for the underlying game-function calls from KH1-LUA-LIBRARY. If nothing fires, check the first for whether the TCP connection succeeded and whether requests are arriving.
+- `scripts/*`
+
+  | File | Description |
+  | :--- | ----------: |
+  | `io_packages/kh1_crowdcontrol_native.dll` | Compiled binary of KH1CrowdControlNative above. |
+  | `kh1_crowdcontrol.lua` | Driver of effects handling on client side, communicates effects to [KH1-LUA-LIBRARY](https://github.com/gaithern/KH1-LUA-LIBRARY) |
+
+- `build.py`
+  - Compiles `kh1_crowdcontrol_native.dll` from its source in `native/KH1CrowdControlNative/*`.
+  - Creates relevant `mod.yml` by calling `generate_mod_yml.py`
+- `generate_mod_yml.py`
+  - Generates `mod.yml` by iterating through `scripts/*`.
+- `icon.png`
+  - Icon for the mod manager.
+- `mod.yml`
+  - OpenKH configuration file for what relevant files are here to compile the mod for end users.
+- `README.md`
+  - This doc.
+
+## Building mod/making changes
+If any script or CPP code needs to be changed, those changes should be accurately picked up and compiled by running `python build.py`.
