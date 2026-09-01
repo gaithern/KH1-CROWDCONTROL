@@ -7,10 +7,67 @@ The mod is a thin connector: it opens a TCP connection to the Crowd Control app 
 ## Installing
 - Install Kingdom Hearts Final Mix (PC, Steam or EGS).
 - Open KH1 at least once.
-- Install OpenKH (Follow set up wizard instructions.  Install both LuaBackend and Panacea).
-- Install `gaithern/KH1-LUA-LIBRARY` as a mod in mods manager.
-- Install `gaithern/KH1-CROWDCONTROL` as a mod in mods manager.
-- Ensure you are running CrowdControl with the KH1 packet via Desktop App (or SDK).
+- Download and extract the latest version of [OpenKH](https://github.com/OpenKH/OpenKh/releases/latest).
+- Open `OpenKh.Tools.ModsManager.exe`.
+- You'll be presented with the set up wizard when opening the mods manager for the first time.  In the wizard, do the following:
+  - Set up your game edition/installation folders (again, only Steam and EGS are currently supported).
+
+  ![10](images/setup/10.png)
+
+  - When prompted, install Panacea.
+
+  ![20](images/setup/20.png)
+
+  - When prompted, install Lua Backend for at least KH1.
+
+  ![30](images/setup/30.png)
+
+  - You may chooose to create `steam_appid.txt`.
+
+  ![40](images/setup/40.png)
+
+  - Extracting data is not required for CrowdControl.
+
+  ![50](images/setup/50.png)
+
+
+- Ensure that you have selected "Kingdom Hearts 1" in the dropdown on the top right.
+
+![60](images/setup/60.png)
+
+- Click the green "+" to install a new mod.
+
+![65](images/setup/65.png)
+
+- In the "Add a new mod from GitHub" form, enter `gaithern/KH1-LUA-LIBRARY` and click "Install".
+
+![68](images/setup/68.png)
+
+- You'll see the mod added to your mod list.
+
+![70](images/setup/70.png)
+
+- Click the green "+" again to install another new mod.
+
+![80](images/setup/80.png)
+
+- In the "Add a new mod from GitHub" form, enter `gaithern/KH1-CROWDCONTROL` and click "Install".
+
+![90](images/setup/90.png)
+
+- You'll see the second mod added to your mod list.
+
+![100](images/setup/100.png)
+
+- Click the checkbox next to both mods.
+
+![110](images/setup/110.png)
+
+- Click "Mod Loader" at the top, and then "Build and Run."  The game will open with your new mods installed.
+
+![120](images/setup/120.png)
+
+- The game should now automatically communicate with the CrowdControl desktop app.
 
 ## Repository Layout
 Below you'll find key components of the repository and their descriptions.
