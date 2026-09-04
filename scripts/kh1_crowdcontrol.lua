@@ -224,10 +224,14 @@ local ANNOUNCE_STYLE = 0
 local ANNOUNCE_X = 0
 local ANNOUNCE_Y = -130
 local function announce_effect(code, viewer)
-    if not kh1.open_text_box then return end
     local who = (viewer and viewer ~= "") and viewer or "the crowd"
-    pcall(kh1.open_text_box, display_name(code) .. " by " .. who, 1,
-        EFFECT_TEXT_SECONDS, ANNOUNCE_STYLE, ANNOUNCE_X, ANNOUNCE_Y)
+    kh1.queue_text_box{
+        text = display_name(code) .. " by " .. who,
+        duration = EFFECT_TEXT_SECONDS,
+        style = ANNOUNCE_STYLE,
+        x = ANNOUNCE_X,
+        y = ANNOUNCE_Y,
+    }
 end
 
 local function try_connect()
@@ -504,7 +508,6 @@ end
 
 function update_crowdcontrol()
     update_enemy_spawns()
-    if kh1.update_text_boxes then kh1.update_text_boxes() end
     spawn_dispatched_this_frame = false
 
     if connecting_handle then
