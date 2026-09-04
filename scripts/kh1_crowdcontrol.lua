@@ -223,15 +223,11 @@ local EFFECT_TEXT_SECONDS = 1
 local ANNOUNCE_STYLE = 0
 local ANNOUNCE_X = 0
 local ANNOUNCE_Y = -130
+local ANNOUNCE_WINDOW = 6
 local function announce_effect(code, viewer)
     local who = (viewer and viewer ~= "") and viewer or "the crowd"
-    kh1.queue_text_box{
-        text = display_name(code) .. " by " .. who,
-        duration = EFFECT_TEXT_SECONDS,
-        style = ANNOUNCE_STYLE,
-        x = ANNOUNCE_X,
-        y = ANNOUNCE_Y,
-    }
+    pcall(kh1.open_text_box, display_name(code) .. " by " .. who, ANNOUNCE_WINDOW,
+        EFFECT_TEXT_SECONDS, ANNOUNCE_STYLE, ANNOUNCE_X, ANNOUNCE_Y)
 end
 
 local function try_connect()
